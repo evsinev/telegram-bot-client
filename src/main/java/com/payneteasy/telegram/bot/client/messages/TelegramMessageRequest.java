@@ -11,4 +11,7 @@ public class TelegramMessageRequest {
 
     private final String text;
 
+    @SerializedName("parse_mode")
+    private final String parseMode;
+
 }
