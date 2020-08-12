@@ -22,12 +22,12 @@
 
     <description>Simple API servlet</description>
 
-    <url>https://github.com/evsinev/telegram-bot-api</url>
+    <url>https://github.com/evsinev/telegram-bot-client</url>
 
     <scm>
-        <connection>scm:git:git@github.com:evsinev/telegram-bot-api.git</connection>
-        <developerConnection>scm:git:git@github.com:evsinev/telegram-bot-api.git</developerConnection>
-        <url>https://github.com/evsinev/telegram-bot-api</url>
+        <connection>scm:git:git@github.com:evsinev/telegram-bot-client.git</connection>
+        <developerConnection>scm:git:git@github.com:evsinev/telegram-bot-client.git</developerConnection>
+        <url>https://github.com/evsinev/telegram-bot-client</url>
         <tag>HEAD</tag>
     </scm>
 
