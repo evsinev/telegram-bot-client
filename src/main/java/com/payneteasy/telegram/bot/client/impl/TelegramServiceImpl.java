@@ -2,11 +2,12 @@ package com.payneteasy.telegram.bot.client.impl;
 
 import com.payneteasy.telegram.bot.client.ITelegramService;
 import com.payneteasy.telegram.bot.client.http.ITelegramHttpClient;
+import com.payneteasy.telegram.bot.client.messages.ChatActionRequest;
 import com.payneteasy.telegram.bot.client.messages.TelegramMessageRequest;
+import com.payneteasy.telegram.bot.client.messages.TelegramSetMyCommandsRequest;
 import com.payneteasy.telegram.bot.client.model.TelegramMessage;
 import com.payneteasy.telegram.bot.client.model.TelegramUser;
-import com.payneteasy.telegram.bot.client.webhook.TelegramWebhookRequest;
-import com.payneteasy.telegram.bot.client.webhook.TelegramWebhookResponse;
+import com.payneteasy.telegram.bot.client.messages.TelegramWebhookRequest;
 
 public class TelegramServiceImpl implements ITelegramService {
 
@@ -26,15 +27,23 @@ public class TelegramServiceImpl implements ITelegramService {
         return http.post("sendMessage", aRequest, TelegramMessage.class);
     }
 
-
     @Override
-    public TelegramWebhookResponse setWebhook(TelegramWebhookRequest aRequest) {
-        return http.post("setWebhook", aRequest, TelegramWebhookResponse.class);
+    public void setWebhook(TelegramWebhookRequest aRequest) {
+        http.post("setWebhook", aRequest);
     }
 
     @Override
-    public TelegramWebhookResponse clearWebhook(String botToken) {
-        TelegramWebhookRequest request = new TelegramWebhookRequest("", botToken);
-        return http.post("setWebhook", request, TelegramWebhookResponse.class);
+    public void clearWebhook() {
+        http.post("setWebhook", new TelegramWebhookRequest(""));
+    }
+
+    @Override
+    public void setMyCommands(TelegramSetMyCommandsRequest aMyCommands) {
+        http.post("setMyCommands", aMyCommands);
+    }
+
+    @Override
+    public void sendChatAction(ChatActionRequest aChatActionRequest) {
+        http.post("sendChatAction", aChatActionRequest);
     }
 }

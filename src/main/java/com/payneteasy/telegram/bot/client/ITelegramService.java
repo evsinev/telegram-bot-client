@@ -1,10 +1,11 @@
 package com.payneteasy.telegram.bot.client;
 
+import com.payneteasy.telegram.bot.client.messages.ChatActionRequest;
 import com.payneteasy.telegram.bot.client.messages.TelegramMessageRequest;
+import com.payneteasy.telegram.bot.client.messages.TelegramSetMyCommandsRequest;
 import com.payneteasy.telegram.bot.client.model.TelegramMessage;
 import com.payneteasy.telegram.bot.client.model.TelegramUser;
-import com.payneteasy.telegram.bot.client.webhook.TelegramWebhookRequest;
-import com.payneteasy.telegram.bot.client.webhook.TelegramWebhookResponse;
+import com.payneteasy.telegram.bot.client.messages.TelegramWebhookRequest;
 
 public interface ITelegramService {
 
@@ -12,15 +13,13 @@ public interface ITelegramService {
 
     TelegramMessage sendMessage(TelegramMessageRequest aRequest);
 
-    TelegramWebhookResponse setWebhook(TelegramWebhookRequest aRequest);
+    void setWebhook(TelegramWebhookRequest aRequest);
 
-    TelegramWebhookResponse clearWebhook(String botToken);
+    void clearWebhook();
 
-    // setWebhook
-    // {
-    //  "ok": true,
-    //  "result": true,
-    //  "description": "Webhook was set"
-    //}
-    
+    void setMyCommands(TelegramSetMyCommandsRequest aMyCommands);
+
+    void sendChatAction(ChatActionRequest aChatActionRequest) ;
+
+
 }

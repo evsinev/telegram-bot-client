@@ -1,4 +1,4 @@
-package com.payneteasy.telegram.bot.client.webhook;
+package com.payneteasy.telegram.bot.client.messages;
 
 import lombok.Data;
 
@@ -6,6 +6,5 @@ import lombok.Data;
 public class TelegramWebhookRequest {
 
     private final String url;
-    private final String botToken;
 
 }
