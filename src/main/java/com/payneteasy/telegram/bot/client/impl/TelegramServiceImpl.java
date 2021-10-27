@@ -5,6 +5,9 @@ import com.payneteasy.telegram.bot.client.http.ITelegramHttpClient;
 import com.payneteasy.telegram.bot.client.messages.ChatActionRequest;
 import com.payneteasy.telegram.bot.client.messages.TelegramMessageRequest;
 import com.payneteasy.telegram.bot.client.messages.TelegramSetMyCommandsRequest;
+import com.payneteasy.telegram.bot.client.messages.invoice.TelegramAnswerPreCheckoutQueryRequest;
+import com.payneteasy.telegram.bot.client.messages.invoice.TelegramAnswerShippingQueryRequest;
+import com.payneteasy.telegram.bot.client.messages.invoice.TelegramInvoiceRequest;
 import com.payneteasy.telegram.bot.client.model.TelegramMessage;
 import com.payneteasy.telegram.bot.client.model.TelegramUser;
 import com.payneteasy.telegram.bot.client.messages.TelegramWebhookRequest;
@@ -46,4 +49,20 @@ public class TelegramServiceImpl implements ITelegramService {
     public void sendChatAction(ChatActionRequest aChatActionRequest) {
         http.post("sendChatAction", aChatActionRequest);
     }
+
+    @Override
+    public void sendInvoice(TelegramInvoiceRequest telegramInvoiceRequest) {
+        http.post("sendInvoice", telegramInvoiceRequest);
+    }
+
+    @Override
+    public void answerPreCheckoutQuery(TelegramAnswerPreCheckoutQueryRequest telegramAnswerPreCheckoutQueryRequest) {
+        http.post("answerPreCheckoutQuery", telegramAnswerPreCheckoutQueryRequest);
+    }
+
+    @Override
+    public void answerShippingQuery(TelegramAnswerShippingQueryRequest telegramAnswerShippingQueryRequest) {
+        http.post("answerShippingQuery", telegramAnswerShippingQueryRequest);
+    }
+
 }
