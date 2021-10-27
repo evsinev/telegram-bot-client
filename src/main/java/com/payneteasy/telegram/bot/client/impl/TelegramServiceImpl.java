@@ -6,6 +6,7 @@ import com.payneteasy.telegram.bot.client.messages.ChatActionRequest;
 import com.payneteasy.telegram.bot.client.messages.TelegramMessageRequest;
 import com.payneteasy.telegram.bot.client.messages.TelegramSetMyCommandsRequest;
 import com.payneteasy.telegram.bot.client.messages.invoice.TelegramAnswerPreCheckoutQueryRequest;
+import com.payneteasy.telegram.bot.client.messages.invoice.TelegramAnswerShippingQueryRequest;
 import com.payneteasy.telegram.bot.client.messages.invoice.TelegramInvoiceRequest;
 import com.payneteasy.telegram.bot.client.model.TelegramMessage;
 import com.payneteasy.telegram.bot.client.model.TelegramUser;
@@ -57,6 +58,11 @@ public class TelegramServiceImpl implements ITelegramService {
     @Override
     public void answerPreCheckoutQuery(TelegramAnswerPreCheckoutQueryRequest telegramAnswerPreCheckoutQueryRequest) {
         http.post("answerPreCheckoutQuery", telegramAnswerPreCheckoutQueryRequest);
+    }
+
+    @Override
+    public void answerShippingQuery(TelegramAnswerShippingQueryRequest telegramAnswerShippingQueryRequest) {
+        http.post("answerShippingQuery", telegramAnswerShippingQueryRequest);
     }
 
 }

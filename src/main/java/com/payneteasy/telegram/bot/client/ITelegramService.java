@@ -4,6 +4,7 @@ import com.payneteasy.telegram.bot.client.messages.ChatActionRequest;
 import com.payneteasy.telegram.bot.client.messages.TelegramMessageRequest;
 import com.payneteasy.telegram.bot.client.messages.TelegramSetMyCommandsRequest;
 import com.payneteasy.telegram.bot.client.messages.invoice.TelegramAnswerPreCheckoutQueryRequest;
+import com.payneteasy.telegram.bot.client.messages.invoice.TelegramAnswerShippingQueryRequest;
 import com.payneteasy.telegram.bot.client.messages.invoice.TelegramInvoiceRequest;
 import com.payneteasy.telegram.bot.client.model.TelegramMessage;
 import com.payneteasy.telegram.bot.client.model.TelegramUser;
@@ -27,5 +28,7 @@ public interface ITelegramService {
     void sendInvoice(TelegramInvoiceRequest telegramInvoiceRequest);
 
     void answerPreCheckoutQuery(TelegramAnswerPreCheckoutQueryRequest telegramAnswerPreCheckoutQueryRequest);
+
+    void answerShippingQuery(TelegramAnswerShippingQueryRequest telegramAnswerShippingQueryRequest);
 
 }
