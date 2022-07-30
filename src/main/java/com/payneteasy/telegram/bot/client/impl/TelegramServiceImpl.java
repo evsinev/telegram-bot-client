@@ -2,12 +2,9 @@ package com.payneteasy.telegram.bot.client.impl;
 
 import com.payneteasy.telegram.bot.client.ITelegramService;
 import com.payneteasy.telegram.bot.client.http.ITelegramHttpClient;
-import com.payneteasy.telegram.bot.client.messages.ChatActionRequest;
-import com.payneteasy.telegram.bot.client.messages.TelegramMessageRequest;
-import com.payneteasy.telegram.bot.client.messages.TelegramSetMyCommandsRequest;
+import com.payneteasy.telegram.bot.client.messages.*;
 import com.payneteasy.telegram.bot.client.model.TelegramMessage;
 import com.payneteasy.telegram.bot.client.model.TelegramUser;
-import com.payneteasy.telegram.bot.client.messages.TelegramWebhookRequest;
 
 public class TelegramServiceImpl implements ITelegramService {
 
@@ -45,5 +42,10 @@ public class TelegramServiceImpl implements ITelegramService {
     @Override
     public void sendChatAction(ChatActionRequest aChatActionRequest) {
         http.post("sendChatAction", aChatActionRequest);
+    }
+
+    @Override
+    public TelegramGetUpdatesResponse getUpdates(TelegramGetUpdatesRequest aRequest) {
+        return http.post("getUpdates", aRequest, TelegramGetUpdatesResponse.class);
     }
 }

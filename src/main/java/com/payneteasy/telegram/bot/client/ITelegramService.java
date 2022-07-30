@@ -1,11 +1,8 @@
 package com.payneteasy.telegram.bot.client;
 
-import com.payneteasy.telegram.bot.client.messages.ChatActionRequest;
-import com.payneteasy.telegram.bot.client.messages.TelegramMessageRequest;
-import com.payneteasy.telegram.bot.client.messages.TelegramSetMyCommandsRequest;
+import com.payneteasy.telegram.bot.client.messages.*;
 import com.payneteasy.telegram.bot.client.model.TelegramMessage;
 import com.payneteasy.telegram.bot.client.model.TelegramUser;
-import com.payneteasy.telegram.bot.client.messages.TelegramWebhookRequest;
 
 public interface ITelegramService {
 
@@ -21,5 +18,15 @@ public interface ITelegramService {
 
     void sendChatAction(ChatActionRequest aChatActionRequest) ;
 
-
+    /**
+     *
+     * Use this method to receive incoming updates using long polling
+     *
+     * 1. This method will not work if an outgoing webhook is set up.
+     * 
+     * 2. In order to avoid getting duplicate updates, recalculate offset after each server response.
+     *
+     * @return An Array of Update objects is returned
+     */
+    TelegramGetUpdatesResponse getUpdates(TelegramGetUpdatesRequest aRequest);
 }
