@@ -48,4 +48,9 @@ public class TelegramServiceImpl implements ITelegramService {
     public TelegramGetUpdatesResponse getUpdates(TelegramGetUpdatesRequest aRequest) {
         return http.post("getUpdates", aRequest, TelegramGetUpdatesResponse.class);
     }
+
+    @Override
+    public TelegramMessage editMessageText(EditMessageTextRequest aRequest) {
+        return http.post("editMessageText", aRequest, TelegramMessage.class);
+    }
 }
