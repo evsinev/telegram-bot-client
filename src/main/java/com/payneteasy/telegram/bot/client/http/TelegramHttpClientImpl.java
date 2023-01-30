@@ -3,11 +3,13 @@ package com.payneteasy.telegram.bot.client.http;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.payneteasy.telegram.bot.client.TelegramCommandException;
+import com.payneteasy.telegram.bot.client.messages.IChatId;
 import com.payneteasy.telegram.bot.client.messages.TelegramStandardResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -45,6 +47,7 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
                 String             json        = new String(response.getBody(), UTF_8);
                 LOG.debug("{} {}: response {}", id, aMethodName, json);
                 if (response.getStatusCode() != 200) {
+                    logUnsuccessfulResponseCode(id, response.getStatusCode(), null);
                     throw new IllegalStateException(json);
                 }
                 return gson.fromJson(json, aResponseClass);
@@ -76,6 +79,7 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
                 String             responseJson     = new String(response.getBody(), UTF_8);
                 LOG.debug("{} {}: response {}", id, aMethodName, responseJson);
                 if (response.getStatusCode() != 200) {
+                    logUnsuccessfulResponseCode(id, response.getStatusCode(), aRequest);
                     throw new TelegramCommandException(responseJson, id, -2);
                 }
                 return gson.fromJson(responseJson, aResponseClass);
@@ -92,5 +96,13 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
         if(!response.isOk()) {
             throw new TelegramCommandException(response.getDescription(), id, response.getErrorCode());
         }
+    }
+
+    private <R> void logUnsuccessfulResponseCode(String id, int statusCode, R aRequest) {
+        Integer chatId = null;
+        if (Objects.nonNull(aRequest) && aRequest instanceof IChatId) {
+            chatId = ((IChatId) aRequest).getChatId();
+        }
+        LOG.warn("Unsuccessful response status code: {}, id: {}, bot token: {}, chat id: {}", statusCode, id, token, chatId);
     }
 }

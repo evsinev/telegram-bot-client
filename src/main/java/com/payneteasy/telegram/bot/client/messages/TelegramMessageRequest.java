@@ -8,7 +8,7 @@ import lombok.Data;
 
 @Data
 @Builder
-public class TelegramMessageRequest {
+public class TelegramMessageRequest implements IChatId {
 
     @SerializedName("chat_id")
     private final int chatId;
@@ -20,5 +20,10 @@ public class TelegramMessageRequest {
 
     @SerializedName("reply_markup")
     private final ReplyKeyboard replyMarkup;
+
+    @Override
+    public int getChatId() {
+        return chatId;
+    }
 
 }
