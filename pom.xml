@@ -185,6 +185,7 @@
                     <value>true</value>
                 </property>
             </activation>
+<!--
             <build>
                 <plugins>
 
@@ -205,6 +206,7 @@
                     </plugin>
                 </plugins>
             </build>
+-->
         </profile>
     </profiles>
 
