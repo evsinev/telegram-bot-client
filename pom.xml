@@ -44,15 +44,15 @@
     -->
     <distributionManagement>
         <repository>
-            <id>sonatype-nexus-release</id>
-            <name>sonatype oss RELEASE repository</name>
-            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2</url>
+            <id>mpos-repo</id>
+            <name>mpos release repository</name>
+            <url>https://mpos.pne.io/maven-deploy/releases</url>
         </repository>
 
         <snapshotRepository>
-            <id>sonatype-nexus-snapshot</id>
-            <name>sonatype oss SNAPSHOT repository</name>
-            <url>http://oss.sonatype.org/content/repositories/snapshots</url>
+            <id>mpos-repo-snapshots</id>
+            <name>mpos snapshot repository</name>
+            <url>https://mpos.pne.io/maven-deploy/snapshots</url>
             <uniqueVersion>false</uniqueVersion>
         </snapshotRepository>
 
