@@ -17,7 +17,7 @@ public class ChatActionRequest {
      * Unique identifier for the target chat
      */
     @SerializedName("chat_id")
-    private final Integer chatId;
+    private final Long chatId;
 
 //    /**
 //     * username of the target channel (in the format @channelusername)

@@ -7,7 +7,7 @@ import lombok.Data;
 public class Update {
 
     @SerializedName("update_id")
-    private Integer updateId;
+    private Long updateId;
 
     @SerializedName("message")
     private Message message;

@@ -11,7 +11,7 @@ import lombok.Data;
 public class TelegramMessageRequest {
 
     @SerializedName("chat_id")
-    private final int chatId;
+    private final long chatId;
 
     private final String text;
 

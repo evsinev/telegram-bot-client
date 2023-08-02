@@ -7,7 +7,7 @@ import lombok.Data;
 public class Chat {
 
     @SerializedName("id")
-    private Integer id;
+    private Long id;
 
     @SerializedName("type")
     private String type;

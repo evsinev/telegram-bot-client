@@ -20,14 +20,14 @@ public class EditMessageTextRequest {
      * Unique identifier for the target chat or username of the target channel (in the format @channelusername)
      */
     @SerializedName("chat_id")
-    Integer chatId;
+    Long chatId;
 
 
     /**
      * Required if inline_message_id is not specified. Identifier of the message to edit
      */
     @SerializedName("message_id")
-    Integer messageId;
+    Long messageId;
 
     /**
      * Required if chat_id and message_id are not specified. Identifier of the inline message

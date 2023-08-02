@@ -9,7 +9,7 @@ import java.util.List;
 public class Message {
 
     @SerializedName("message_id")
-    private final Integer messageId;
+    private final Long messageId;
 
     @SerializedName("from")
     private final User from;

@@ -16,7 +16,7 @@ public class Contact {
     private final String lastName;
 
     @SerializedName("user_id")
-    private final Integer userID;
+    private final Long userID;
 
     @SerializedName("vcard")
     private final String vCard;
