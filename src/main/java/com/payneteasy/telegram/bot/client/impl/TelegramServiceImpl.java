@@ -53,4 +53,9 @@ public class TelegramServiceImpl implements ITelegramService {
     public TelegramMessage editMessageText(EditMessageTextRequest aRequest) {
         return http.post("editMessageText", aRequest, TelegramMessage.class);
     }
+
+    @Override
+    public void setMyDescription(SetMyDescriptionRequest aRequest) {
+        http.post("setMyDescription", aRequest);
+    }
 }

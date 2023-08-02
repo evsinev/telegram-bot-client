@@ -37,4 +37,13 @@ public interface ITelegramService {
      * the edited Message is returned, otherwise True is returned
      */
     TelegramMessage editMessageText(EditMessageTextRequest aRequest);
+
+    /**
+     * Use this method to change the bot's description,
+     * which is shown in the chat with the bot if the chat is empty.
+     *
+     * @param aRequest description info
+     */
+    void setMyDescription(SetMyDescriptionRequest aRequest);
+
 }
