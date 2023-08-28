@@ -12,7 +12,7 @@ import static lombok.AccessLevel.PRIVATE;
 @Builder
 @Data
 @FieldDefaults(makeFinal = true, level = PRIVATE)
-public class EditMessageTextRequest {
+public class EditMessageTextRequest implements IChatId {
 
     /**
      * Required if inline_message_id is not specified.
@@ -58,4 +58,9 @@ public class EditMessageTextRequest {
      */
     @SerializedName("reply_markup")
     ReplyKeyboard replyMarkup;
+
+    @Override
+    public int getChatId() {
+        return chatId;
+    }
 }
