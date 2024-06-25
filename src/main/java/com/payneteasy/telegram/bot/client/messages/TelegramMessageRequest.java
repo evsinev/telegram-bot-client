@@ -1,6 +1,7 @@
 package com.payneteasy.telegram.bot.client.messages;
 
 import com.google.gson.annotations.SerializedName;
+import com.payneteasy.telegram.bot.client.model.LinkPreviewOptions;
 import com.payneteasy.telegram.bot.client.model.ParseMode;
 import com.payneteasy.telegram.bot.client.model.replykeyboard.ReplyKeyboard;
 import lombok.Builder;
@@ -20,5 +21,8 @@ public class TelegramMessageRequest {
 
     @SerializedName("reply_markup")
     private final ReplyKeyboard replyMarkup;
+
+    @SerializedName("link_preview_options")
+    private LinkPreviewOptions linkPreviewOptions;
 
 }
