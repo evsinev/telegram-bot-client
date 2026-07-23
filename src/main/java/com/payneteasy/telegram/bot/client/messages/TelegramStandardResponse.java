@@ -1,6 +1,7 @@
 package com.payneteasy.telegram.bot.client.messages;
 
 import com.google.gson.annotations.SerializedName;
+import com.payneteasy.telegram.bot.client.model.ResponseParameters;
 import lombok.Data;
 
 @Data
@@ -25,5 +26,10 @@ public class TelegramStandardResponse {
      */
     @SerializedName("error_code")
     private final Integer errorCode;
+
+    /**
+     * Optional field returned on some errors (e.g. 'retry_after' on 429 Too Many Requests).
+     */
+    private ResponseParameters parameters;
 
 }
