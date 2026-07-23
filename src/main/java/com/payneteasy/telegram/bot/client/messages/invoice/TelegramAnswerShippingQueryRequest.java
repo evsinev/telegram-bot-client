@@ -5,7 +5,7 @@ import lombok.Builder;
 import lombok.NonNull;
 import lombok.Value;
 
-import java.util.Set;
+import java.util.List;
 
 @Value
 @Builder(toBuilder = true)
@@ -13,13 +13,13 @@ public class TelegramAnswerShippingQueryRequest {
 
     @NonNull
     @SerializedName("shipping_query_id")
-    Long shippingQueryId;
+    String shippingQueryId;
 
     @NonNull
     Boolean ok;
 
     @SerializedName("shipping_options")
-    Set<ShippingOption> shippingOptions;
+    List<ShippingOption> shippingOptions;
 
     @SerializedName("error_message")
     String errorMessage;

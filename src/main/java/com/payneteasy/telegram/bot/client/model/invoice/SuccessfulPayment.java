@@ -9,7 +9,7 @@ public class SuccessfulPayment {
     private String currency;
 
     @SerializedName("total_amount")
-    private Integer totalAmountCents;
+    private Integer totalAmount;
 
     @SerializedName("invoice_payload")
     private String invoicePayload;

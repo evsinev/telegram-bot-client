@@ -5,7 +5,7 @@ import lombok.Builder;
 import lombok.NonNull;
 import lombok.Value;
 
-import java.util.Set;
+import java.util.List;
 
 @Value
 @Builder(toBuilder = true)
@@ -13,7 +13,7 @@ public class TelegramInvoiceRequest {
 
     @NonNull
     @SerializedName("chat_id")
-    Integer chatId;
+    Long chatId;
 
     @NonNull
     String title;
@@ -33,7 +33,7 @@ public class TelegramInvoiceRequest {
 
     @NonNull
     @SerializedName("prices")
-    Set<LabeledPrice> labeledPrices;
+    List<LabeledPrice> labeledPrices;
 
     @SerializedName("max_tip_amount")
     Integer maxTipAmount;

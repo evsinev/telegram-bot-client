@@ -34,6 +34,6 @@ public class Message {
     private final Message replyToMessage;
 
     @SerializedName("successful_payment")
-    private SuccessfulPayment successfulPayment;
+    private final SuccessfulPayment successfulPayment;
 
 }

@@ -1,8 +1,8 @@
 package com.payneteasy.telegram.bot.client.model;
 
 import com.google.gson.annotations.SerializedName;
-import com.payneteasy.telegram.bot.client.model.invoice.PreCheckOutQueryMessage;
-import com.payneteasy.telegram.bot.client.model.invoice.ShippingQueryMessage;
+import com.payneteasy.telegram.bot.client.model.invoice.PreCheckoutQuery;
+import com.payneteasy.telegram.bot.client.model.invoice.ShippingQuery;
 import lombok.Data;
 
 @Data
@@ -15,9 +15,9 @@ public class Update {
     private Message message;
 
     @SerializedName("pre_checkout_query")
-    private PreCheckOutQueryMessage preCheckOutQueryMessage;
+    private PreCheckoutQuery preCheckoutQuery;
 
     @SerializedName("shipping_query")
-    private ShippingQueryMessage shippingQueryMessage;
+    private ShippingQuery shippingQuery;
 
 }

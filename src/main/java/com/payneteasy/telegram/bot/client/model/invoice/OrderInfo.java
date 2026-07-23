@@ -1,7 +1,9 @@
 package com.payneteasy.telegram.bot.client.model.invoice;
 
 import com.google.gson.annotations.SerializedName;
+import lombok.Data;
 
+@Data
 public class OrderInfo {
     @SerializedName("name")
     private String userName;

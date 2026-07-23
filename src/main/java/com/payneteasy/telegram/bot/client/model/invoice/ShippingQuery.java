@@ -5,8 +5,8 @@ import com.payneteasy.telegram.bot.client.model.User;
 import lombok.Data;
 
 @Data
-public class ShippingQueryMessage {
-    private Long id;
+public class ShippingQuery {
+    private String id;
 
     @SerializedName("from")
     private User from;

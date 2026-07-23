@@ -5,8 +5,8 @@ import com.payneteasy.telegram.bot.client.model.User;
 import lombok.Data;
 
 @Data
-public class PreCheckOutQueryMessage {
-    private Long id;
+public class PreCheckoutQuery {
+    private String id;
 
     @SerializedName("from")
     private User from;
@@ -14,7 +14,7 @@ public class PreCheckOutQueryMessage {
     private String currency;
 
     @SerializedName("total_amount")
-    private Integer totalAmountCents;
+    private Integer totalAmount;
 
     @SerializedName("invoice_payload")
     private String invoicePayload;

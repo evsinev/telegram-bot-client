@@ -11,7 +11,7 @@ public class TelegramAnswerPreCheckoutQueryRequest {
 
     @NonNull
     @SerializedName("pre_checkout_query_id")
-    Long preCheckOutOrderId;
+    String preCheckoutQueryId;
 
     @NonNull
     Boolean ok;

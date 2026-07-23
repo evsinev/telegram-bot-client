@@ -1,15 +1,16 @@
 package com.payneteasy.telegram.bot.client.messages.invoice;
 
-import com.google.gson.annotations.SerializedName;
-import lombok.Data;
+import lombok.Builder;
 import lombok.NonNull;
+import lombok.Value;
 
-@Data
+@Value
+@Builder(toBuilder = true)
 public class LabeledPrice {
-    @NonNull
-    private String label;
 
     @NonNull
-    @SerializedName("amount")
-    private Integer amountCents;
+    String label;
+
+    @NonNull
+    Integer amount;
 }

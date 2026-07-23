@@ -1,20 +1,22 @@
 package com.payneteasy.telegram.bot.client.messages.invoice;
 
-import com.google.gson.annotations.SerializedName;
-import lombok.Data;
+import lombok.Builder;
 import lombok.NonNull;
+import lombok.Value;
 
-import java.util.Set;
+import java.util.List;
 
-@Data
+@Value
+@Builder(toBuilder = true)
 public class ShippingOption {
-    @NonNull
-    private String id;
 
     @NonNull
-    private String title;
+    String id;
 
     @NonNull
-    private Set<LabeledPrice> prices;
+    String title;
+
+    @NonNull
+    List<LabeledPrice> prices;
 
 }
