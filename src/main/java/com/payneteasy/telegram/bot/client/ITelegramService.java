@@ -1,6 +1,7 @@
 package com.payneteasy.telegram.bot.client;
 
 import com.payneteasy.telegram.bot.client.messages.*;
+import com.payneteasy.telegram.bot.client.messages.invoice.*;
 import com.payneteasy.telegram.bot.client.model.TelegramMessage;
 import com.payneteasy.telegram.bot.client.model.TelegramUser;
 
@@ -16,7 +17,7 @@ public interface ITelegramService {
 
     void setMyCommands(TelegramSetMyCommandsRequest aMyCommands);
 
-    void sendChatAction(ChatActionRequest aChatActionRequest) ;
+    void sendChatAction(ChatActionRequest aChatActionRequest);
 
     /**
      *
@@ -45,5 +46,11 @@ public interface ITelegramService {
      * @param aRequest description info
      */
     void setMyDescription(SetMyDescriptionRequest aRequest);
+
+    void sendInvoice(TelegramInvoiceRequest telegramInvoiceRequest);
+
+    void answerPreCheckoutQuery(TelegramAnswerPreCheckoutQueryRequest telegramAnswerPreCheckoutQueryRequest);
+
+    void answerShippingQuery(TelegramAnswerShippingQueryRequest telegramAnswerShippingQueryRequest);
 
 }

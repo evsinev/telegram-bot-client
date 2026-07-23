@@ -3,6 +3,7 @@ package com.payneteasy.telegram.bot.client.impl;
 import com.payneteasy.telegram.bot.client.ITelegramService;
 import com.payneteasy.telegram.bot.client.http.ITelegramHttpClient;
 import com.payneteasy.telegram.bot.client.messages.*;
+import com.payneteasy.telegram.bot.client.messages.invoice.*;
 import com.payneteasy.telegram.bot.client.model.TelegramMessage;
 import com.payneteasy.telegram.bot.client.model.TelegramUser;
 
@@ -58,4 +59,20 @@ public class TelegramServiceImpl implements ITelegramService {
     public void setMyDescription(SetMyDescriptionRequest aRequest) {
         http.post("setMyDescription", aRequest);
     }
+
+    @Override
+    public void sendInvoice(TelegramInvoiceRequest telegramInvoiceRequest) {
+        http.post("sendInvoice", telegramInvoiceRequest);
+    }
+
+    @Override
+    public void answerPreCheckoutQuery(TelegramAnswerPreCheckoutQueryRequest telegramAnswerPreCheckoutQueryRequest) {
+        http.post("answerPreCheckoutQuery", telegramAnswerPreCheckoutQueryRequest);
+    }
+
+    @Override
+    public void answerShippingQuery(TelegramAnswerShippingQueryRequest telegramAnswerShippingQueryRequest) {
+        http.post("answerShippingQuery", telegramAnswerShippingQueryRequest);
+    }
+
 }

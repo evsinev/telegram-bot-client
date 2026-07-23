@@ -1,6 +1,7 @@
 package com.payneteasy.telegram.bot.client.model;
 
 import com.google.gson.annotations.SerializedName;
+import com.payneteasy.telegram.bot.client.model.invoice.SuccessfulPayment;
 import lombok.Data;
 
 import java.util.List;
@@ -31,5 +32,8 @@ public class Message {
 
     @SerializedName("reply_to_message")
     private final Message replyToMessage;
+
+    @SerializedName("successful_payment")
+    private SuccessfulPayment successfulPayment;
 
 }
