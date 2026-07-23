@@ -58,6 +58,18 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
         return String.valueOf(commandId.incrementAndGet());
     }
 
+    private Integer parseRetryAfter(String responseJson) {
+        try {
+            TelegramStandardResponse error = gson.fromJson(responseJson, TelegramStandardResponse.class);
+            if (error != null && error.getParameters() != null) {
+                return error.getParameters().getRetryAfter();
+            }
+        } catch (Exception e) {
+            LOG.debug("Cannot parse error body for retry_after: {}", responseJson);
+        }
+        return null;
+    }
+
     @Override
     public <R, T> T post(String aMethodName, R aRequest, Class<T> aResponseClass) {
         String id = nextCommandId();
@@ -76,7 +88,7 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
                 String             responseJson     = new String(response.getBody(), UTF_8);
                 LOG.debug("{} {}: response {}", id, aMethodName, responseJson);
                 if (response.getStatusCode() != 200) {
-                    throw new TelegramCommandException(responseJson, id, -2);
+                    throw new TelegramCommandException(responseJson, id, response.getStatusCode(), parseRetryAfter(responseJson));
                 }
                 return gson.fromJson(responseJson, aResponseClass);
             }
