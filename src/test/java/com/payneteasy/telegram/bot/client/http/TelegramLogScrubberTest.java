@@ -216,6 +216,39 @@ public class TelegramLogScrubberTest {
         assertEquals("https://h/?token%3Dpublic=value", scrub("https://h/?token%3Dpublic=value"));
     }
 
+    /** Round 6: the opening quote of the value can itself be encoded. */
+    @Test
+    public void anEncodedOpeningQuoteStillMarksAStringValue() {
+        assertFalse(scrubBody("%22secret_token%22%3A%22" + OPAQUE + "%22").contains(OPAQUE));
+        assertFalse(scrubBody("\"\\u0022secret_token\\u0022:\\u0022" + OPAQUE + "\\u0022\"").contains(OPAQUE));
+    }
+
+    /**
+     * In a document that is itself a JSON string, the inner strings close with \" too. Reading
+     * that as content ran the mask on to the end and took the fields after it with it.
+     */
+    @Test
+    public void aNestedJsonStringKeepsWhatFollowsTheSecret() {
+        assertEquals("\"{\\\"secret_token\\\":\\\"***\\\",\\\"next\\\":\\\"keep\\\"}\"",
+                scrub("\"{\\\"secret_token\\\":\\\"" + OPAQUE + "\\\",\\\"next\\\":\\\"keep\\\"}\""));
+    }
+
+    /**
+     * Partial overlap, with a space that makes the query span end before the field span begins:
+     * without the union the second one is dropped and its tail stays in the open.
+     */
+    @Test
+    public void aPartiallyOverlappingFieldSpanIsStillMasked() {
+        assertFalse(scrub("?token=a\\\"secret_token\\\": \\\"" + OPAQUE + "\\\"").contains(OPAQUE));
+    }
+
+    /** The structure scan reads the original, where \u0022 is six characters and not a quote. */
+    @Test
+    public void theStructureScanReadsTheOriginalNotADecodedCopy() {
+        assertEquals("{\"secret_token\":***,\"next\":\"keep\"}",
+                scrub("{\"secret_token\":{\"x\":\"\\u0022}\"},\"next\":\"keep\"}"));
+    }
+
     /**
      * The declared boundary: one layer of encoding, not two. Written down as a test so that it
      * reads as a decision rather than as something nobody got round to.

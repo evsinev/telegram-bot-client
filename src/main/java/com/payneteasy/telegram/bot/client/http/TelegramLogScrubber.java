@@ -124,20 +124,37 @@ public final class TelegramLogScrubber {
         return apply(aText, spans);
     }
 
-    /** {@code "secret_token": "..."} and {@code "secret_token": {...}}. */
+    /**
+     * {@code "secret_token": "..."} and {@code "secret_token": {...}}.
+     *
+     * What kind of value follows is read from the decoded copy, not from the original: an opening
+     * quote written {@code %22} or {@code \u0022} is still an opening quote, and checking the
+     * original character for it meant no span was created at all.
+     */
     private static void collectFields(List<Span> aSpans, String aOriginal, Decoded aDecoded) {
         Matcher matcher = SECRET_TOKEN_MARKER.matcher(aDecoded.text);
+        int     covered = -1;
+
         while (matcher.find()) {
-            int from = aDecoded.origin[matcher.end()];
-            if (from >= aOriginal.length()) {
+            int at = matcher.end();
+            if (at >= aDecoded.text.length() || aDecoded.origin[matcher.start()] < covered) {
+                // Already inside something we are masking. Skipping before the scan below is what
+                // keeps a body of nested secret_token fields from being walked once per field.
                 continue;
             }
-            char first = aOriginal.charAt(from);
-            if (first == '"' || (first == '\\' && from + 1 < aOriginal.length() && aOriginal.charAt(from + 1) == '"')) {
-                int opens = from + (first == '"' ? 1 : 2);
-                aSpans.add(new Span(aDecoded.origin[matcher.start()], opens, endOfJsonString(aOriginal, opens), ""));
+
+            char    first   = aDecoded.text.charAt(at);
+            boolean escaped = first == '\\' && at + 1 < aDecoded.text.length() && aDecoded.text.charAt(at + 1) == '"';
+            int     start   = aDecoded.origin[matcher.start()];
+
+            if (first == '"' || escaped) {
+                int opens = aDecoded.origin[at + (escaped ? 2 : 1)];
+                covered = endOfJsonString(aOriginal, opens, escaped);
+                aSpans.add(new Span(start, opens, covered, ""));
             } else if (first == '{' || first == '[') {
-                aSpans.add(new Span(aDecoded.origin[matcher.start()], from, endOfStructure(aOriginal, from), ""));
+                int opens = aDecoded.origin[at];
+                covered = endOfStructure(aOriginal, opens);
+                aSpans.add(new Span(start, opens, covered, ""));
             }
         }
     }
@@ -171,9 +188,22 @@ public final class TelegramLogScrubber {
      * {@code \\uXXXX} is six characters of it, not the quote it would decode to.
      */
     private static int endOfJsonString(String aText, int aFrom) {
+        return endOfJsonString(aText, aFrom, false);
+    }
+
+    /**
+     * A string ends at the same spelling of quote that opened it. In a document that is itself a
+     * JSON string, the inner strings open and close with {@code \"}, and reading that closing
+     * quote as content ran the mask on to the end of the document, taking the fields after it.
+     */
+    private static int endOfJsonString(String aText, int aFrom, boolean aEscapedQuotes) {
         for (int i = aFrom; i < aText.length(); i++) {
             char c = aText.charAt(i);
-            if (c == '\\') {
+            if (aEscapedQuotes) {
+                if (c == '\\' && i + 1 < aText.length() && aText.charAt(i + 1) == '"') {
+                    return i;
+                }
+            } else if (c == '\\') {
                 i++;
             } else if (c == '"') {
                 return i;
