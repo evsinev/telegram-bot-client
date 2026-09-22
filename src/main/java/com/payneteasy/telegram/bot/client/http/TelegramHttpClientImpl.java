@@ -78,7 +78,9 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
             LOG.debug("{} {}: request", id, aMethodName);
             response = client.fetchResponse();
             json     = new String(response.getBody(), UTF_8);
-            LOG.debug("{} {}: response {}", id, aMethodName, scrubBody(json));
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("{} {}: response {}", id, aMethodName, scrubBody(json));
+            }
         } catch (IOException | RuntimeException e) {
             throw cannotInvoke(aMethodName, id, e);
         }
@@ -117,7 +119,9 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
                 return error.getParameters().getRetryAfter();
             }
         } catch (Exception e) {
-            LOG.debug("Cannot parse error body for retry_after: {}", scrubBody(responseJson));
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Cannot parse error body for retry_after: {}", scrubBody(responseJson));
+            }
         }
         return null;
     }
@@ -135,11 +139,15 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
             client.connect(buildUrl(aMethodName), timeouts.getConnectionMs(), timeouts.getReadMs(), "POST");
             sendHeaders(client);
             String requestJson = gson.toJson(aRequest);
-            LOG.debug("{} {}: request  {}", id, aMethodName, scrubBody(requestJson));
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("{} {}: request  {}", id, aMethodName, scrubBody(requestJson));
+            }
             client.sendBody(requestJson.getBytes(UTF_8));
             response     = client.fetchResponse();
             responseJson = new String(response.getBody(), UTF_8);
-            LOG.debug("{} {}: response {}", id, aMethodName, scrubBody(responseJson));
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("{} {}: response {}", id, aMethodName, scrubBody(responseJson));
+            }
         } catch (IOException | RuntimeException e) {
             throw cannotInvoke(aMethodName, id, e);
         }

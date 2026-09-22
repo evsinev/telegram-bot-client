@@ -15,6 +15,7 @@ public class TelegramLogScrubberTest {
 
     private static final String SECRET_PART = "AAHfake0Token1For2Tests3456789abcXYZ";
     private static final String TOKEN       = "123456789:" + SECRET_PART;
+    private static final String OPAQUE      = "opaque-secret-value-1234";
     private static final String SECRET      = "5d41402abc4b2a76b9719d911017c592a1b2c3d4e5f60718293a4b5c6d7e8f90";
 
     @Test
@@ -114,9 +115,63 @@ public class TelegramLogScrubberTest {
         assertFalse(scrubBody(truncated).contains(SECRET_PART));
     }
 
+    /**
+     * Decoding is only ever a way to see a secret, never a way to rewrite the record: a token had
+     * to be present for the decoded copy to be chosen at all, which is what makes this sensitive
+     * to a decoder that maps {@code +} to a space.
+     */
     @Test
-    public void plusSignIsNotTurnedIntoASpace() {
+    public void plusSignSurvivesEvenWhenACopyHadToBeDecoded() {
+        String scrubbed = scrub("a+b 123456789%3A" + SECRET_PART);
+
+        assertFalse(scrubbed.contains(SECRET_PART));
+        assertEquals("a+b 123456789:***", scrubbed);
+    }
+
+    @Test
+    public void aMalformedEscapeDoesNotRewriteTheRecord() {
         assertEquals("a+b c%ZZ", scrubBody("a+b c%ZZ"));
+    }
+
+    /** The three ways the second review got a secret past the structural walk. */
+    @Test
+    public void percentEncodedParameterNameDoesNotHideTheValue() {
+        String body = "{\"url\":\"https://h/h?bot%5Ftoken=" + OPAQUE + "\"}";
+
+        assertFalse(scrubBody(body).contains(OPAQUE));
+    }
+
+    @Test
+    public void aBareJsonStringIsAWholeDocumentToo() {
+        assertFalse(scrubBody("\"123456789\\u003a" + SECRET_PART + "\"").contains(SECRET_PART));
+    }
+
+    @Test
+    public void aBodyTooDeepForTheParserStillGetsScrubbed() {
+        StringBuilder deep = new StringBuilder();
+        for (int i = 0; i < 100_000; i++) {
+            deep.append('[');
+        }
+        deep.append("{\"secret_\\u0074oken\":\"").append(OPAQUE).append("\"}");
+        for (int i = 0; i < 100_000; i++) {
+            deep.append(']');
+        }
+
+        assertFalse(scrubBody(deep.toString()).contains(OPAQUE));
+    }
+
+    @Test
+    public void aDeepButParsableBodyIsMaskedBeyondTheDepthLimit() {
+        StringBuilder deep = new StringBuilder();
+        for (int i = 0; i < 300; i++) {
+            deep.append("{\"a\":");
+        }
+        deep.append("\"").append(SECRET).append("\"");
+        for (int i = 0; i < 300; i++) {
+            deep.append('}');
+        }
+
+        assertFalse(scrubBody(deep.toString()).contains(SECRET));
     }
 
     @Test

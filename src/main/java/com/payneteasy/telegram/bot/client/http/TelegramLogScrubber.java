@@ -47,6 +47,12 @@ public final class TelegramLogScrubber {
     private static final Pattern SENSITIVE_PARAM = Pattern.compile(
             "((?:\\?|&|\\\\u0026)(?:bot_token|secret_token|token)(?:=|\\\\u003[dD]))[^&\\s\"'<>]*");
 
+    /**
+     * Deeper than this and the subtree is masked wholesale. No Telegram body is anywhere near it,
+     * and a walk that recurses as far as the input asks is a way to lose the walk itself.
+     */
+    private static final int MAX_DEPTH = 100;
+
     /** {@code <bot_id>:<secret>}, taken from {@code scrub.rs:29-30}. */
     private static final Pattern TOKEN = Pattern.compile("([0-9]{1,20}):[A-Za-z0-9_-]{20,256}");
 
@@ -65,15 +71,32 @@ public final class TelegramLogScrubber {
         if (aBody == null || aBody.isEmpty()) {
             return aBody;
         }
-        try {
-            JsonElement parsed = new JsonParser().parse(aBody);
-            if (parsed.isJsonObject() || parsed.isJsonArray()) {
-                return scrubJson(parsed).toString();
+        if (looksLikeJson(aBody)) {
+            try {
+                return scrubJson(new JsonParser().parse(aBody), 0).toString();
+            } catch (RuntimeException e) {
+                // truncated, or deeper than the parser can take - the flat rules still apply,
+                // and they decode escapes themselves, so nothing rides on this succeeding
             }
-        } catch (RuntimeException e) {
-            // not JSON — the flat rules still apply
         }
         return scrub(aBody);
+    }
+
+    /**
+     * A body is taken through the parser only when it opens as an object or an array. Anything
+     * else keeps its exact shape — run through the parser, a one-word error page would come back
+     * quoted — and is handled by the flat rules, which decode escapes themselves. A bare JSON
+     * string is a whole document too, but widening this to accept it would add a branch no test
+     * can tell apart from the flat path.
+     */
+    private static boolean looksLikeJson(String aBody) {
+        for (int i = 0; i < aBody.length(); i++) {
+            char c = aBody.charAt(i);
+            if (!Character.isWhitespace(c)) {
+                return c == '{' || c == '[';
+            }
+        }
+        return false;
     }
 
     /**
@@ -88,26 +111,77 @@ public final class TelegramLogScrubber {
         if (aText == null || aText.isEmpty()) {
             return aText;
         }
-        String text = SECRET_TOKEN_FIELD.matcher(aText).replaceAll("$1" + MASK + "$2");
-        text = SENSITIVE_PARAM.matcher(text).replaceAll("$1" + MASK);
-        return maskTokens(text);
+        return applyRules(reveal(aText));
     }
 
-    private static JsonElement scrubJson(JsonElement aElement) {
+    private static String applyRules(String aText) {
+        String text = SECRET_TOKEN_FIELD.matcher(aText).replaceAll("$1" + MASK + "$2");
+        text = SENSITIVE_PARAM.matcher(text).replaceAll("$1" + MASK);
+        return TOKEN.matcher(text).replaceAll("$1:" + MASK);
+    }
+
+    /**
+     * Pick the form of the string the rules see the most in.
+     *
+     * A secret can be hidden from a rule by encoding rather than by shape: {@code bot%5Ftoken=}
+     * hides the parameter name, {@code 123456789\u003aAAH...} hides the separator of the token.
+     * The proxy does not need this — its flat rules only ever see real URLs — but ours also gets
+     * handed a body that did not go through the parser, where Gson's escapes are still in place.
+     *
+     * Counting matches rather than asking "did anything match" is what makes it safe: a string
+     * holding one plain token and one encoded token matches either way, and stopping at the first
+     * form that matched would leave the second untouched.
+     */
+    private static String reveal(String aText) {
+        String best  = aText;
+        int    found = countMatches(aText);
+
+        String unescaped = jsonUnescape(aText);
+        String[] candidates = {
+                unescaped,
+                percentDecode(aText),
+                unescaped == null ? null : percentDecode(unescaped)
+        };
+        for (String candidate : candidates) {
+            if (candidate != null && countMatches(candidate) > found) {
+                best  = candidate;
+                found = countMatches(candidate);
+            }
+        }
+        return best;
+    }
+
+    private static int countMatches(String aText) {
+        return count(SECRET_TOKEN_FIELD, aText) + count(SENSITIVE_PARAM, aText) + count(TOKEN, aText);
+    }
+
+    private static int count(Pattern aPattern, String aText) {
+        java.util.regex.Matcher matcher = aPattern.matcher(aText);
+        int found = 0;
+        while (matcher.find()) {
+            found++;
+        }
+        return found;
+    }
+
+    private static JsonElement scrubJson(JsonElement aElement, int aDepth) {
+        if (aDepth > MAX_DEPTH) {
+            return new JsonPrimitive(MASK);
+        }
         if (aElement.isJsonObject()) {
             JsonObject scrubbed = new JsonObject();
             for (Map.Entry<String, JsonElement> entry : aElement.getAsJsonObject().entrySet()) {
                 String key = entry.getKey();
                 scrubbed.add(scrub(key), SECRET_TOKEN_FIELD_NAME.equals(key)
                         ? new JsonPrimitive(MASK)
-                        : scrubJson(entry.getValue()));
+                        : scrubJson(entry.getValue(), aDepth + 1));
             }
             return scrubbed;
         }
         if (aElement.isJsonArray()) {
             JsonArray scrubbed = new JsonArray();
             for (JsonElement item : aElement.getAsJsonArray()) {
-                scrubbed.add(scrubJson(item));
+                scrubbed.add(scrubJson(item, aDepth + 1));
             }
             return scrubbed;
         }
@@ -115,23 +189,6 @@ public final class TelegramLogScrubber {
             return new JsonPrimitive(scrub(aElement.getAsString()));
         }
         return aElement;
-    }
-
-    /**
-     * Percent-encoding can hide the separator: {@code 123%3AAAH...} does not match the token
-     * pattern while {@code 123:AAH...} does. As in {@code scrub.rs:45-65}, the decoded copy is
-     * chosen first and every match is then masked — masking the original and stopping there would
-     * leave an encoded token that sits next to a plain one untouched.
-     */
-    private static String maskTokens(String aText) {
-        String candidate = aText;
-
-        String decoded = percentDecode(aText);
-        if (decoded != null && TOKEN.matcher(decoded).find()) {
-            candidate = decoded;
-        }
-
-        return TOKEN.matcher(candidate).replaceAll("$1:" + MASK);
     }
 
     /**
@@ -168,6 +225,50 @@ public final class TelegramLogScrubber {
         flush(bytes, out);
 
         return any ? out.toString() : null;
+    }
+
+    /**
+     * Decode {@code \\uXXXX} and nothing else.
+     *
+     * Gson escapes {@code =}, {@code &} and any non-ASCII character this way, so a body that did
+     * not survive the parser can still be holding a secret that only looks harmless. Written by
+     * hand for the same reason as the percent decoder: a malformed escape has to be left alone
+     * rather than cost us the rest of the string.
+     *
+     * @return the decoded copy, or null when there was nothing to decode
+     */
+    private static String jsonUnescape(String aText) {
+        int at = aText.indexOf("\\u");
+        if (at < 0) {
+            return null;
+        }
+
+        StringBuilder out = new StringBuilder(aText.length());
+        for (int i = 0; i < aText.length(); ) {
+            int value = i + 5 < aText.length() && aText.charAt(i) == '\\' && aText.charAt(i + 1) == 'u'
+                    ? hexQuad(aText, i + 2)
+                    : -1;
+            if (value < 0) {
+                out.append(aText.charAt(i));
+                i++;
+            } else {
+                out.append((char) value);
+                i += 6;
+            }
+        }
+        return out.toString();
+    }
+
+    private static int hexQuad(String aText, int aFrom) {
+        int value = 0;
+        for (int i = aFrom; i < aFrom + 4; i++) {
+            int digit = Character.digit(aText.charAt(i), 16);
+            if (digit < 0) {
+                return -1;
+            }
+            value = value * 16 + digit;
+        }
+        return value;
     }
 
     private static void flush(ByteArrayOutputStream aBytes, StringBuilder aOut) {
