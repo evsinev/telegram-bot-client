@@ -231,6 +231,65 @@ public class TelegramLogScrubberTest {
         assertEquals("a+b c%ZZ", scrubBody("a+b c%ZZ"));
     }
 
+    /**
+     * Round 5: an encoded delimiter inside the value used to end it, because the search for the
+     * end ran on the decoded copy where {@code %22} had become the very quote it stops at.
+     */
+    @Test
+    public void anEncodedDelimiterInsideAValueDoesNotEndIt() {
+        assertEquals("https://h/?token=***&next=ok", scrub("https://h/?token=%22" + OPAQUE + "&next=ok"));
+        assertEquals("https://h/?token=***&next=ok", scrub("https://h/?token=%20" + OPAQUE + "&next=ok"));
+    }
+
+    /** An escaped quote is content of the string, not its end. */
+    @Test
+    public void anEscapedQuoteInsideTheValueDoesNotEndIt() {
+        assertEquals("{\"secret_token\":\"***", scrubBody("{\"secret_token\":\"\\\"" + OPAQUE));
+    }
+
+    /**
+     * A quote written as \u0022 is content too: the scan must not close the string on it.
+     *
+     * Through {@link TelegramLogScrubber#scrub}, not {@code scrubBody}: a body that parses never
+     * reaches this scanner at all, and a test that goes through the parser proves nothing about it.
+     */
+    @Test
+    public void anEscapedQuoteInsideAStructureDoesNotCloseIt() {
+        assertFalse(scrubBody("{\"secret_token\":{\"x\":\"\\u0022}" + OPAQUE + "\"}}").contains(OPAQUE));
+
+        // Exact output, so that masking too much is caught as well as masking too little: a brace
+        // inside a string must not end the structure, and the field after it must survive.
+        assertEquals("{\"secret_token\":***,\"next\":\"keep\"}",
+                scrub("{\"secret_token\":{\"x\":\"}\"},\"next\":\"keep\"}"));
+    }
+
+    /** Brackets match by kind: a '[' is not closed by a '}'. */
+    @Test
+    public void aBracketIsNotClosedByTheWrongKind() {
+        assertFalse(scrubBody("{\"secret_token\":[}" + OPAQUE + "]}").contains(OPAQUE));
+    }
+
+    /** The field after a masked structure has to survive — the scan must find its real end. */
+    @Test
+    public void theFieldAfterAMaskedStructureIsKept() {
+        assertEquals("{\"secret_token\":\"***\",\"next\":\"keep\"}",
+                scrubBody("{\"secret_token\":{\"a\":1},\"next\":\"keep\"}"));
+
+        // And on the flat path, where the end of the structure is found by scanning rather than
+        // by the parser.
+        assertEquals("{\"secret_token\":***,\"next\":\"keep\"}",
+                scrub("{\"secret_token\":{\"a\":1},\"next\":\"keep\"}"));
+    }
+
+    /**
+     * Two spans can overlap only partly, and dropping the second used to leave the part of it that
+     * reached further in the open.
+     */
+    @Test
+    public void partiallyOverlappingSpansAreMergedNotDropped() {
+        assertFalse(scrub("?token=a\\\"secret_token\\\":\\\"" + OPAQUE + "\\\"").contains(OPAQUE));
+    }
+
     /** The three ways the second review got a secret past the structural walk. */
     @Test
     public void percentEncodedParameterNameDoesNotHideTheValue() {

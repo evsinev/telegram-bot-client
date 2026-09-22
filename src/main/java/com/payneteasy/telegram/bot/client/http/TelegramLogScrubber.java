@@ -6,7 +6,11 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -63,18 +67,11 @@ public final class TelegramLogScrubber {
     /** Structural delimiters, which stay encoded so that an encoded one is read as data. */
     private static final Pattern KEPT_ENCODED = Pattern.compile("%(?:3[dDfF]|26)");
 
-    /**
-     * Value of the {@code secret_token} field, up to the closing quote. The quotes may each carry
-     * a backslash: a JSON string whose content is itself JSON spells them {@code \"} — a whole
-     * body can arrive that way.
-     */
-    private static final Pattern SECRET_TOKEN_FIELD = Pattern.compile("(\\\\?\"secret_token\\\\?\"\\s*:\\s*\\\\?\")[^\"]*");
+    /** Start of the {@code secret_token} field, up to and including the colon. */
+    private static final Pattern SECRET_TOKEN_MARKER = Pattern.compile("\\\\?\"secret_token\\\\?\"\\s*:\\s*");
 
-    /** The same field with a value that is not a string — an object or an array follows. */
-    private static final Pattern SECRET_TOKEN_STRUCTURE = Pattern.compile("\\\\?\"secret_token\\\\?\"\\s*:\\s*(?=[\\[{])");
-
-    /** Value of a sensitive query parameter, ending where the query does. */
-    private static final Pattern SENSITIVE_PARAM = Pattern.compile("([?&](?:bot_token|secret_token|token)=)[^&\\s\"'<>]*");
+    /** Start of a sensitive query parameter, up to and including the equals sign. */
+    private static final Pattern SENSITIVE_PARAM_MARKER = Pattern.compile("[?&](?:bot_token|secret_token|token)=");
 
     /** {@code <bot_id>:<secret>}, taken from {@code scrub.rs:29-30}. */
     private static final Pattern TOKEN = Pattern.compile("([0-9]{1,20}):[A-Za-z0-9_-]{20,256}");
@@ -87,7 +84,7 @@ public final class TelegramLogScrubber {
      * query-parameter rule works on a value that is a URL rather than on its escaped spelling.
      *
      * A body that does not parse — truncated, an HTML error page from an intermediary, or deeper
-     * than the parser can take — falls back to the flat rules, which decode for themselves.
+     * than the parser can take — falls back to the flat rules.
      */
     public static String scrubBody(String aBody) {
         if (aBody == null || aBody.isEmpty()) {
@@ -106,79 +103,144 @@ public final class TelegramLogScrubber {
     /**
      * Scrub a flat string: a URL, an exception message, a body that did not parse.
      *
-     * Four rules, in this order: the {@code secret_token} field with a string value and with a
-     * structured one, the sensitive query parameters, and the token pattern as a backstop for
-     * formats we did not foresee. The {@code bot_id} before the colon is kept, so a log line still
-     * says which bot it is about.
+     * The marker of each secret is found in the decoded copy — that is what an encoded field or
+     * parameter name needs — and where the value <em>ends</em> is then decided by walking the
+     * original. Both halves matter: looking for the end in the decoded copy is what let
+     * {@code ?token=%22opaque...} through, because the {@code %22} the value was carrying turned
+     * into the very quote the search stops at.
      */
     public static String scrub(String aText) {
         if (aText == null || aText.isEmpty()) {
             return aText;
         }
 
-        Decoded     decoded = Decoded.of(aText);
-        List<Span>  spans   = new ArrayList<Span>();
+        Decoded    decoded = Decoded.of(aText);
+        List<Span> spans   = new ArrayList<Span>();
 
-        collect(spans, decoded, SECRET_TOKEN_FIELD, 1);
-        collectStructures(spans, decoded);
-        collect(spans, decoded, SENSITIVE_PARAM, 1);
-        collect(spans, decoded, TOKEN, 1, ":");
+        collectFields(spans, aText, decoded);
+        collectParams(spans, aText, decoded);
+        collectTokens(spans, aText, decoded);
 
-        return decoded.apply(aText, spans);
+        return apply(aText, spans);
     }
 
-    private static void collect(List<Span> aSpans, Decoded aDecoded, Pattern aPattern, int aKeptGroup) {
-        collect(aSpans, aDecoded, aPattern, aKeptGroup, "");
-    }
-
-    /**
-     * Every rule keeps a prefix and masks the rest: the field name and its quote, the parameter
-     * name, or the bot id. The prefix is taken from the original string, so a name that was
-     * written {@code bot%5Ftoken} comes back out spelled the way it arrived.
-     */
-    private static void collect(List<Span> aSpans, Decoded aDecoded, Pattern aPattern, int aKeptGroup, String aSeparator) {
-        Matcher matcher = aPattern.matcher(aDecoded.text);
+    /** {@code "secret_token": "..."} and {@code "secret_token": {...}}. */
+    private static void collectFields(List<Span> aSpans, String aOriginal, Decoded aDecoded) {
+        Matcher matcher = SECRET_TOKEN_MARKER.matcher(aDecoded.text);
         while (matcher.find()) {
-            aSpans.add(new Span(matcher.start(), matcher.end(), matcher.end(aKeptGroup), aSeparator));
+            int from = aDecoded.origin[matcher.end()];
+            if (from >= aOriginal.length()) {
+                continue;
+            }
+            char first = aOriginal.charAt(from);
+            if (first == '"' || (first == '\\' && from + 1 < aOriginal.length() && aOriginal.charAt(from + 1) == '"')) {
+                int opens = from + (first == '"' ? 1 : 2);
+                aSpans.add(new Span(aDecoded.origin[matcher.start()], opens, endOfJsonString(aOriginal, opens), ""));
+            } else if (first == '{' || first == '[') {
+                aSpans.add(new Span(aDecoded.origin[matcher.start()], from, endOfStructure(aOriginal, from), ""));
+            }
+        }
+    }
+
+    /** {@code ?token=...}, up to where the query value ends in the original text. */
+    private static void collectParams(List<Span> aSpans, String aOriginal, Decoded aDecoded) {
+        Matcher matcher = SENSITIVE_PARAM_MARKER.matcher(aDecoded.text);
+        while (matcher.find()) {
+            int from = aDecoded.origin[matcher.end()];
+            aSpans.add(new Span(aDecoded.origin[matcher.start()], from, endOfQueryValue(aOriginal, from), ""));
         }
     }
 
     /**
-     * {@code "secret_token": {...}} — a body too deep for the parser lands in the flat rules, and
-     * there a structured value used to pass untouched. Masked to the matching bracket, or to the
-     * end when the body was cut before it.
+     * The bare token pattern, the backstop for shapes we did not foresee.
+     *
+     * The only rule whose end still comes from the decoded copy, and the only one where that is
+     * safe: it has no terminator to be fooled by, only a positive character class, so a mapped
+     * span can cover more of the original than the match did but never less.
      */
-    private static void collectStructures(List<Span> aSpans, Decoded aDecoded) {
-        Matcher matcher = SECRET_TOKEN_STRUCTURE.matcher(aDecoded.text);
+    private static void collectTokens(List<Span> aSpans, String aOriginal, Decoded aDecoded) {
+        Matcher matcher = TOKEN.matcher(aDecoded.text);
         while (matcher.find()) {
-            aSpans.add(new Span(matcher.start(), balancedEnd(aDecoded.text, matcher.end()), matcher.end(), ""));
+            aSpans.add(new Span(aDecoded.origin[matcher.start()], aDecoded.origin[matcher.end(1)],
+                    aDecoded.origin[matcher.end()], ":"));
         }
     }
 
-    private static int balancedEnd(String aText, int aFrom) {
-        int     depth    = 0;
-        boolean inString = false;
+    /**
+     * Where a JSON string ends in the original text, counting escapes: {@code \"} is content and
+     * {@code \\uXXXX} is six characters of it, not the quote it would decode to.
+     */
+    private static int endOfJsonString(String aText, int aFrom) {
+        for (int i = aFrom; i < aText.length(); i++) {
+            char c = aText.charAt(i);
+            if (c == '\\') {
+                i++;
+            } else if (c == '"') {
+                return i;
+            }
+        }
+        return aText.length();
+    }
+
+    /**
+     * Where a structured value ends in the original text: the bracket matching the one it opens
+     * with, or the end of the text when the body was cut before it.
+     *
+     * Brackets are matched by kind — a {@code [} closed by a {@code }} is not a match — and
+     * brackets inside a string are content. Walking the original rather than a decoded copy is
+     * what keeps a {@code \\u0022} in the middle of a value from reading as the quote that ends it.
+     */
+    private static int endOfStructure(String aText, int aFrom) {
+        Deque<Character> open = new ArrayDeque<Character>();
 
         for (int i = aFrom; i < aText.length(); i++) {
             char c = aText.charAt(i);
-            if (inString) {
-                if (c == '\\') {
-                    i++;
-                } else if (c == '"') {
-                    inString = false;
-                }
-            } else if (c == '"') {
-                inString = true;
+            if (c == '"') {
+                i = endOfJsonString(aText, i + 1);
             } else if (c == '{' || c == '[') {
-                depth++;
+                open.push(c);
             } else if (c == '}' || c == ']') {
-                depth--;
-                if (depth == 0) {
+                if (open.isEmpty() || open.pop() != (c == '}' ? '{' : '[')) {
+                    return aText.length();
+                }
+                if (open.isEmpty()) {
                     return i + 1;
                 }
             }
         }
         return aText.length();
+    }
+
+    /**
+     * Where a query parameter value ends in the original text.
+     *
+     * The two kinds of escape belong to different layers and end the value differently. A JSON
+     * escape is Gson's spelling of a real character: {@code \u0026} <em>is</em> the ampersand that
+     * separates the next parameter, so it ends the value. A percent escape belongs to the URL: the
+     * {@code %26} in a value is data the value carries, and reading it as a separator is what used
+     * to release everything after it.
+     */
+    private static int endOfQueryValue(String aText, int aFrom) {
+        for (int i = aFrom; i < aText.length(); i++) {
+            char c = aText.charAt(i);
+            if (c == '"' || endsValue(c)) {
+                return i;
+            }
+            if (c == '\\' && i + 5 < aText.length() && aText.charAt(i + 1) == 'u') {
+                int decoded = Decoded.hex(aText, i + 2, 4);
+                if (decoded >= 0 && endsValue((char) decoded)) {
+                    return i;
+                }
+                i += 5;
+            } else if (c == '\\') {
+                i++;
+            }
+        }
+        return aText.length();
+    }
+
+    private static boolean endsValue(char aChar) {
+        return aChar == '&' || aChar == '\'' || aChar == '<' || aChar == '>' || Character.isWhitespace(aChar);
     }
 
     /**
@@ -224,18 +286,58 @@ public final class TelegramLogScrubber {
         return aElement;
     }
 
-    /** One match: what to keep, what to replace, in positions of the decoded copy. */
+    /**
+     * Replace every span, overlapping ones merged.
+     *
+     * Merging rather than discarding: two spans can overlap only partly — a query value running
+     * into a {@code secret_token} field that starts inside it — and dropping the second would
+     * leave the part of it that reaches further in the open. The union masks more than either,
+     * which is the right way to be wrong here.
+     */
+    private static String apply(String aOriginal, List<Span> aSpans) {
+        if (aSpans.isEmpty()) {
+            return aOriginal;
+        }
+
+        Collections.sort(aSpans, new Comparator<Span>() {
+            @Override
+            public int compare(Span aLeft, Span aRight) {
+                return aLeft.start != aRight.start ? aLeft.start - aRight.start : aRight.maskTo - aLeft.maskTo;
+            }
+        });
+
+        List<Span> merged = new ArrayList<Span>();
+        for (Span span : aSpans) {
+            Span last = merged.isEmpty() ? null : merged.get(merged.size() - 1);
+            if (last != null && span.start < last.maskTo) {
+                if (span.maskTo > last.maskTo) {
+                    merged.set(merged.size() - 1, new Span(last.start, last.maskFrom, span.maskTo, last.separator));
+                }
+            } else {
+                merged.add(span);
+            }
+        }
+
+        StringBuilder out = new StringBuilder(aOriginal);
+        for (int i = merged.size() - 1; i >= 0; i--) {
+            Span span = merged.get(i);
+            out.replace(span.maskFrom, span.maskTo, span.separator + MASK);
+        }
+        return out.toString();
+    }
+
+    /** One match, in positions of the original string: where it starts, and what to replace. */
     private static final class Span {
 
         private final int    start;
-        private final int    end;
-        private final int    keptUntil;
+        private final int    maskFrom;
+        private final int    maskTo;
         private final String separator;
 
-        private Span(int aStart, int aEnd, int aKeptUntil, String aSeparator) {
+        private Span(int aStart, int aMaskFrom, int aMaskTo, String aSeparator) {
             start     = aStart;
-            end       = aEnd;
-            keptUntil = aKeptUntil;
+            maskFrom  = aMaskFrom;
+            maskTo    = aMaskTo;
             separator = aSeparator;
         }
     }
@@ -244,10 +346,8 @@ public final class TelegramLogScrubber {
      * A decoded copy of a string, with the position in the original every character came from.
      *
      * Written by hand because neither {@link java.net.URLDecoder} nor any decoder in the
-     * dependencies keeps that map — and the map is the whole point: it is what lets the rules read
-     * the decoded form while the output stays the original one. {@code URLDecoder} would also be
-     * wrong on both counts that matter here, throwing on a stray {@code %} and turning {@code +}
-     * into a space.
+     * dependencies keeps that map — and the map is the whole point: it is what lets a rule read
+     * the decoded form while the replacement lands in the original one.
      */
     private static final class Decoded {
 
@@ -288,7 +388,7 @@ public final class TelegramLogScrubber {
             return -1;
         }
 
-        private static int hex(String aText, int aFrom, int aLength) {
+        static int hex(String aText, int aFrom, int aLength) {
             int value = 0;
             for (int i = aFrom; i < aFrom + aLength; i++) {
                 int digit = Character.digit(aText.charAt(i), 16);
@@ -298,44 +398,6 @@ public final class TelegramLogScrubber {
                 value = value * 16 + digit;
             }
             return value;
-        }
-
-        /**
-         * Replace every span in the original string.
-         *
-         * Spans overlap by design — a token sits inside the parameter value that holds it — and the
-         * wider one has to win: masking the token alone would leave {@code bot_token=123:***} where
-         * the whole value should have gone. So the earliest and longest span is taken and anything
-         * inside it dropped, and only then are the survivors applied right to left, where earlier
-         * offsets are still valid.
-         */
-        private String apply(String aOriginal, List<Span> aSpans) {
-            if (aSpans.isEmpty()) {
-                return aOriginal;
-            }
-
-            java.util.Collections.sort(aSpans, new java.util.Comparator<Span>() {
-                @Override
-                public int compare(Span aLeft, Span aRight) {
-                    return aLeft.start != aRight.start ? aLeft.start - aRight.start : aRight.end - aLeft.end;
-                }
-            });
-
-            List<Span> accepted = new ArrayList<Span>();
-            int        coveredTo = -1;
-            for (Span span : aSpans) {
-                if (span.start >= coveredTo) {
-                    accepted.add(span);
-                    coveredTo = span.end;
-                }
-            }
-
-            StringBuilder out = new StringBuilder(aOriginal);
-            for (int i = accepted.size() - 1; i >= 0; i--) {
-                Span span = accepted.get(i);
-                out.replace(origin[span.keptUntil], origin[span.end], span.separator + MASK);
-            }
-            return out.toString();
         }
     }
 }
