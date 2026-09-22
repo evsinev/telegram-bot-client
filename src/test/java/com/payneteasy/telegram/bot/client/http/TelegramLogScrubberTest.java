@@ -161,6 +161,50 @@ public class TelegramLogScrubberTest {
         assertFalse(scrubBody("\"{\\\"secret_token\\\":\\\"" + OPAQUE + "\\\"}\"").contains(OPAQUE));
     }
 
+    /** Round 4: the secret's own characters encoded, not just the separator. */
+    @Test
+    public void anEncodedCharacterInsideTheSecretDoesNotHideIt() {
+        assertEquals("123456789:***", scrub("123456789%3A%41" + SECRET_PART.substring(1)));
+    }
+
+    @Test
+    public void aStructuredSecretTokenValueIsMaskedWhole() {
+        assertFalse(scrubBody("{\"secret_token\":{\"value\":\"" + OPAQUE + "\"}}").contains(OPAQUE));
+    }
+
+    /** A body too deep for the parser lands in the flat rules — with a structured value. */
+    @Test
+    public void aStructuredSecretSurvivesTheParserGivingUp() {
+        StringBuilder deep = new StringBuilder();
+        for (int i = 0; i < 100_000; i++) {
+            deep.append('[');
+        }
+        deep.append("{\"secret_token\":{\"value\":\"").append(OPAQUE).append("\"}}");
+        for (int i = 0; i < 100_000; i++) {
+            deep.append(']');
+        }
+
+        assertFalse(scrubBody(deep.toString()).contains(OPAQUE));
+    }
+
+    @Test
+    public void anEscapeInsideTheValueDoesNotCutTheMaskShort() {
+        assertEquals("{\"secret_token\":\"***", scrubBody("{\"secret_token\":\"\\u006f" + OPAQUE.substring(1)));
+    }
+
+    /** The neighbour of a masked parameter has to survive untouched. */
+    @Test
+    public void theParameterAfterAMaskedOneIsKept() {
+        assertEquals("{\"url\":\"https://h/?token=***\\u0026x\\u003dpublic\"}",
+                scrub("{\"url\":\"https://h/?token=secret\\u0026x\\u003dpublic\"}"));
+    }
+
+    /** An encoded '=' is part of the name, so this parameter is not called "token" at all. */
+    @Test
+    public void anEncodedEqualsIsNotAStructuralSeparator() {
+        assertEquals("https://h/?token%3Dpublic=value", scrub("https://h/?token%3Dpublic=value"));
+    }
+
     /**
      * The declared boundary: one layer of encoding, not two. Written down as a test so that it
      * reads as a decision rather than as something nobody got round to.
