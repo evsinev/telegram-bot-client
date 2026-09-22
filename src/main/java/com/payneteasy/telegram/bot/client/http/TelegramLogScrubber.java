@@ -67,9 +67,6 @@ public final class TelegramLogScrubber {
     /** Structural delimiters, which stay encoded so that an encoded one is read as data. */
     private static final Pattern KEPT_ENCODED = Pattern.compile("%(?:3[dDfF]|26)");
 
-    /** Start of the {@code secret_token} field, up to and including the colon. */
-    private static final Pattern SECRET_TOKEN_MARKER = Pattern.compile("\\\\?\"secret_token\\\\?\"\\s*:\\s*");
-
     /** Start of a sensitive query parameter, up to and including the equals sign. */
     private static final Pattern SENSITIVE_PARAM_MARKER = Pattern.compile("[?&](?:bot_token|secret_token|token)=");
 
@@ -94,7 +91,14 @@ public final class TelegramLogScrubber {
             try {
                 return scrubJson(new JsonParser().parse(aBody), 0).toString();
             } catch (RuntimeException e) {
-                // see above - the flat rules still apply
+                // Truncated, or deeper than the parser will go. A `secret_token` is identified by
+                // the name of its key and by nothing else - the value is 64 hex characters that
+                // match no pattern - so without the structure there is nothing dependable to look
+                // for. Seven rounds of review went into trying anyway, and each attempt to find the
+                // end of such a value by hand was got past by another spelling. So the body does
+                // not go to the log at all; the length still does, and so do the method and status
+                // at the call site.
+                return "<unparsable body, " + aBody.length() + " chars, withheld>";
             }
         }
         return scrub(aBody);
@@ -103,11 +107,15 @@ public final class TelegramLogScrubber {
     /**
      * Scrub a flat string: a URL, an exception message, a body that did not parse.
      *
-     * The marker of each secret is found in the decoded copy — that is what an encoded field or
-     * parameter name needs — and where the value <em>ends</em> is then decided by walking the
-     * original. Both halves matter: looking for the end in the decoded copy is what let
-     * {@code ?token=%22opaque...} through, because the {@code %22} the value was carrying turned
-     * into the very quote the search stops at.
+     * Two rules, neither of which has anything to do with JSON, which is why neither breaks on it:
+     * the sensitive query parameters and the token pattern. A {@code secret_token} is not among
+     * them — it is recognised by the name of its key, and a key is a thing structure has. Bodies
+     * are handled by {@link #scrubBody(String)} and never arrive here.
+     *
+     * The marker is found in the decoded copy — that is what an encoded parameter name needs — and
+     * where the value <em>ends</em> is decided by walking the original. Both halves matter: looking
+     * for the end in the decoded copy is what let {@code ?token=%22opaque...} through, because the
+     * {@code %22} the value was carrying turned into the very quote the search stops at.
      */
     public static String scrub(String aText) {
         if (aText == null || aText.isEmpty()) {
@@ -117,46 +125,10 @@ public final class TelegramLogScrubber {
         Decoded    decoded = Decoded.of(aText);
         List<Span> spans   = new ArrayList<Span>();
 
-        collectFields(spans, aText, decoded);
         collectParams(spans, aText, decoded);
         collectTokens(spans, aText, decoded);
 
         return apply(aText, spans);
-    }
-
-    /**
-     * {@code "secret_token": "..."} and {@code "secret_token": {...}}.
-     *
-     * What kind of value follows is read from the decoded copy, not from the original: an opening
-     * quote written {@code %22} or {@code \u0022} is still an opening quote, and checking the
-     * original character for it meant no span was created at all.
-     */
-    private static void collectFields(List<Span> aSpans, String aOriginal, Decoded aDecoded) {
-        Matcher matcher = SECRET_TOKEN_MARKER.matcher(aDecoded.text);
-        int     covered = -1;
-
-        while (matcher.find()) {
-            int at = matcher.end();
-            if (at >= aDecoded.text.length() || aDecoded.origin[matcher.start()] < covered) {
-                // Already inside something we are masking. Skipping before the scan below is what
-                // keeps a body of nested secret_token fields from being walked once per field.
-                continue;
-            }
-
-            char    first   = aDecoded.text.charAt(at);
-            boolean escaped = first == '\\' && at + 1 < aDecoded.text.length() && aDecoded.text.charAt(at + 1) == '"';
-            int     start   = aDecoded.origin[matcher.start()];
-
-            if (first == '"' || escaped) {
-                int opens = aDecoded.origin[at + (escaped ? 2 : 1)];
-                covered = endOfJsonString(aOriginal, opens, escaped);
-                aSpans.add(new Span(start, opens, covered, ""));
-            } else if (first == '{' || first == '[') {
-                int opens = aDecoded.origin[at];
-                covered = endOfStructure(aOriginal, opens);
-                aSpans.add(new Span(start, opens, covered, ""));
-            }
-        }
     }
 
     /** {@code ?token=...}, up to where the query value ends in the original text. */
@@ -184,64 +156,6 @@ public final class TelegramLogScrubber {
     }
 
     /**
-     * Where a JSON string ends in the original text, counting escapes: {@code \"} is content and
-     * {@code \\uXXXX} is six characters of it, not the quote it would decode to.
-     */
-    private static int endOfJsonString(String aText, int aFrom) {
-        return endOfJsonString(aText, aFrom, false);
-    }
-
-    /**
-     * A string ends at the same spelling of quote that opened it. In a document that is itself a
-     * JSON string, the inner strings open and close with {@code \"}, and reading that closing
-     * quote as content ran the mask on to the end of the document, taking the fields after it.
-     */
-    private static int endOfJsonString(String aText, int aFrom, boolean aEscapedQuotes) {
-        for (int i = aFrom; i < aText.length(); i++) {
-            char c = aText.charAt(i);
-            if (aEscapedQuotes) {
-                if (c == '\\' && i + 1 < aText.length() && aText.charAt(i + 1) == '"') {
-                    return i;
-                }
-            } else if (c == '\\') {
-                i++;
-            } else if (c == '"') {
-                return i;
-            }
-        }
-        return aText.length();
-    }
-
-    /**
-     * Where a structured value ends in the original text: the bracket matching the one it opens
-     * with, or the end of the text when the body was cut before it.
-     *
-     * Brackets are matched by kind — a {@code [} closed by a {@code }} is not a match — and
-     * brackets inside a string are content. Walking the original rather than a decoded copy is
-     * what keeps a {@code \\u0022} in the middle of a value from reading as the quote that ends it.
-     */
-    private static int endOfStructure(String aText, int aFrom) {
-        Deque<Character> open = new ArrayDeque<Character>();
-
-        for (int i = aFrom; i < aText.length(); i++) {
-            char c = aText.charAt(i);
-            if (c == '"') {
-                i = endOfJsonString(aText, i + 1);
-            } else if (c == '{' || c == '[') {
-                open.push(c);
-            } else if (c == '}' || c == ']') {
-                if (open.isEmpty() || open.pop() != (c == '}' ? '{' : '[')) {
-                    return aText.length();
-                }
-                if (open.isEmpty()) {
-                    return i + 1;
-                }
-            }
-        }
-        return aText.length();
-    }
-
-    /**
      * Where a query parameter value ends in the original text.
      *
      * The two kinds of escape belong to different layers and end the value differently. A JSON
@@ -256,34 +170,47 @@ public final class TelegramLogScrubber {
             if (c == '"' || endsValue(c)) {
                 return i;
             }
+            if (c == '\\' && i + 1 < aText.length() && aText.charAt(i + 1) == '"') {
+                // The quote that closes the JSON string the URL sits in.
+                return i;
+            }
             if (c == '\\' && i + 5 < aText.length() && aText.charAt(i + 1) == 'u') {
                 int decoded = Decoded.hex(aText, i + 2, 4);
                 if (decoded >= 0 && endsValue((char) decoded)) {
                     return i;
                 }
                 i += 5;
-            } else if (c == '\\') {
-                i++;
             }
         }
         return aText.length();
     }
 
+    /**
+     * A {@code ?} ends a value too. It is not legal to start a second query, so a string carrying
+     * thousands of them is malformed - and without this each marker would rescan everything after
+     * it, which on 16 000 of them took two seconds.
+     */
     private static boolean endsValue(char aChar) {
-        return aChar == '&' || aChar == '\'' || aChar == '<' || aChar == '>' || Character.isWhitespace(aChar);
+        return aChar == '&' || aChar == '?' || aChar == '\'' || aChar == '<' || aChar == '>'
+                || Character.isWhitespace(aChar);
     }
 
     /**
-     * A body is taken through the parser only when it opens as an object or an array. Anything
-     * else keeps its exact shape — run through the parser, a one-word error page would come back
-     * quoted — and is handled by the flat rules. A bare JSON string is a whole document too, but
-     * the flat rules cover it, so it does not earn a branch of its own.
+     * Whether this is meant to be JSON — an object, an array, or a bare string, each of which is a
+     * whole document.
+     *
+     * Decided on the decoded copy, because the shape can be hidden by encoding: a body beginning
+     * {@code %22secret_token%22} is JSON spelled sideways, and reading the raw first character sent
+     * it to the flat rules, where a field name means nothing. Anything else keeps its exact shape
+     * and goes to the flat rules, which is what they are for — run through the parser, a one-word
+     * error page would come back quoted.
      */
     private static boolean looksLikeJson(String aBody) {
-        for (int i = 0; i < aBody.length(); i++) {
-            char c = aBody.charAt(i);
+        String decoded = Decoded.of(aBody).text;
+        for (int i = 0; i < decoded.length(); i++) {
+            char c = decoded.charAt(i);
             if (!Character.isWhitespace(c)) {
-                return c == '{' || c == '[';
+                return c == '{' || c == '[' || c == '"';
             }
         }
         return false;
@@ -311,7 +238,10 @@ public final class TelegramLogScrubber {
             return scrubbed;
         }
         if (aElement.isJsonPrimitive() && aElement.getAsJsonPrimitive().isString()) {
-            return new JsonPrimitive(scrub(aElement.getAsString()));
+            String value = aElement.getAsString();
+            // A string whose contents are themselves JSON gets the same treatment as a body, or the
+            // fields inside it would be invisible: the flat rules know a URL and a token, not a key.
+            return new JsonPrimitive(aDepth < MAX_DEPTH && looksLikeJson(value) ? scrubBody(value) : scrub(value));
         }
         return aElement;
     }
