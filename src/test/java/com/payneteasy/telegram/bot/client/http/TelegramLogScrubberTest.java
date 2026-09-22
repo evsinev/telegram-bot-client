@@ -115,17 +115,60 @@ public class TelegramLogScrubberTest {
         assertFalse(scrubBody(truncated).contains(SECRET_PART));
     }
 
+    /** An encoded separator is recognised where it stands; the text around it is not rewritten. */
+    @Test
+    public void anEncodedSeparatorIsMaskedWithoutTouchingTheRestOfTheLine() {
+        assertEquals("a+b 123456789:***", scrub("a+b 123456789%3A" + SECRET_PART));
+    }
+
     /**
-     * Decoding is only ever a way to see a secret, never a way to rewrite the record: a token had
-     * to be present for the decoded copy to be chosen at all, which is what makes this sensitive
-     * to a decoder that maps {@code +} to a space.
+     * The round-3 regression: decoding the whole string made {@code %26} inside a value look like
+     * a separator, and the rest of the value came out in the open.
      */
     @Test
-    public void plusSignSurvivesEvenWhenACopyHadToBeDecoded() {
-        String scrubbed = scrub("a+b 123456789%3A" + SECRET_PART);
+    public void anEncodedAmpersandStaysInsideTheValueItBelongsTo() {
+        assertEquals("https://h/?bot%5Ftoken=***", scrub("https://h/?bot%5Ftoken=%26" + OPAQUE));
+    }
+
+    /** Whatever is not a secret has to come out exactly as it went in. */
+    @Test
+    public void nothingButTheSecretIsRewritten() {
+        assertEquals("https://h/?x=%26token=public&bot%5Ftoken=***",
+                scrub("https://h/?x=%26token=public&bot%5Ftoken=" + OPAQUE));
+    }
+
+    /**
+     * An escaped line break must stay escaped: a scrubber that turns it into a real one splits the
+     * log record in two, which is the opposite of what this class is for.
+     */
+    @Test
+    public void anEscapedLineBreakIsNotTurnedIntoARealOne() {
+        String scrubbed = scrubBody("\"before\\u000aFORGED 123456789\\u003a" + SECRET_PART + "\"");
 
         assertFalse(scrubbed.contains(SECRET_PART));
-        assertEquals("a+b 123456789:***", scrubbed);
+        assertFalse("the record must stay one line", scrubbed.contains("\n"));
+    }
+
+    /** A truncated body is exactly the body that did not survive the parser. */
+    @Test
+    public void anUnterminatedSecretValueIsStillMasked() {
+        assertEquals("{\"secret_token\":\"***", scrubBody("{\"secret_token\":\"" + OPAQUE));
+    }
+
+    /** A JSON string holding JSON: the field name is spelled with escaped quotes. */
+    @Test
+    public void aSecretInsideAStringThatHoldsJsonIsMasked() {
+        assertFalse(scrubBody("\"{\\\"secret_token\\\":\\\"" + OPAQUE + "\\\"}\"").contains(OPAQUE));
+    }
+
+    /**
+     * The declared boundary: one layer of encoding, not two. Written down as a test so that it
+     * reads as a decision rather than as something nobody got round to.
+     */
+    @Test
+    public void twoLayersOfEncodingAreOutOfScope() {
+        assertTrue("if this ever starts passing, the boundary in the plan moved and nobody said so",
+                scrub("https://h/?bot%255Ftoken=" + OPAQUE).contains(OPAQUE));
     }
 
     @Test
