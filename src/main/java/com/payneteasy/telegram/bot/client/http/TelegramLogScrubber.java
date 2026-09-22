@@ -84,24 +84,63 @@ public final class TelegramLogScrubber {
      * than the parser can take — falls back to the flat rules.
      */
     public static String scrubBody(String aBody) {
+        return scrubBody(aBody, 0);
+    }
+
+    /**
+     * What a body is gets decided by the parser, not by guessing from its first character. The
+     * parser is lenient — it accepts a byte order mark, a {@code )]}'} guard, a comment before the
+     * document — and a guess that disagreed with it sent a body it would have parsed to the flat
+     * rules, where a field name means nothing.
+     *
+     * Anything that is not an object or an array is either a bare string document or plain text
+     * the lenient parser swallowed, and those cannot be told apart reliably. So: if it was meant
+     * to be JSON and we could not walk it, it is withheld; otherwise the flat rules apply.
+     */
+    private static String scrubBody(String aBody, int aDepth) {
         if (aBody == null || aBody.isEmpty()) {
             return aBody;
         }
-        if (looksLikeJson(aBody)) {
-            try {
-                return scrubJson(new JsonParser().parse(aBody), 0).toString();
-            } catch (RuntimeException e) {
-                // Truncated, or deeper than the parser will go. A `secret_token` is identified by
-                // the name of its key and by nothing else - the value is 64 hex characters that
-                // match no pattern - so without the structure there is nothing dependable to look
-                // for. Seven rounds of review went into trying anyway, and each attempt to find the
-                // end of such a value by hand was got past by another spelling. So the body does
-                // not go to the log at all; the length still does, and so do the method and status
-                // at the call site.
-                return "<unparsable body, " + aBody.length() + " chars, withheld>";
+        if (aDepth > MAX_DEPTH) {
+            return withheld(aBody);
+        }
+
+        try {
+            JsonElement parsed = new JsonParser().parse(aBody);
+            if (parsed.isJsonObject() || parsed.isJsonArray()) {
+                return scrubJson(parsed, aDepth).toString();
+            }
+        } catch (RuntimeException e) {
+            // Truncated, or deeper than the parser will go - handled below like anything else we
+            // could not walk.
+        }
+
+        return meantToBeJson(aBody) ? withheld(aBody) : scrub(aBody);
+    }
+
+    /**
+     * A {@code secret_token} is identified by the name of its key and by nothing else — the value
+     * is 64 hex characters that match no pattern — so a body we could not walk has nothing
+     * dependable left to look for. Seven rounds of review were spent proving that, each one
+     * getting past the previous attempt with another spelling.
+     */
+    private static String withheld(String aBody) {
+        return "<unparsable body, " + aBody.length() + " chars, withheld>";
+    }
+
+    /**
+     * Whether this was meant to be a JSON document, decided on the decoded copy: the shape can be
+     * hidden by encoding, and a body beginning {@code %22secret_token%22} is JSON spelled sideways.
+     */
+    private static boolean meantToBeJson(String aBody) {
+        String decoded = Decoded.of(aBody).text;
+        for (int i = 0; i < decoded.length(); i++) {
+            char c = decoded.charAt(i);
+            if (!Character.isWhitespace(c) && c != '\ufeff') {
+                return c == '{' || c == '[' || c == '"';
             }
         }
-        return scrub(aBody);
+        return false;
     }
 
     /**
@@ -195,26 +234,6 @@ public final class TelegramLogScrubber {
                 || Character.isWhitespace(aChar);
     }
 
-    /**
-     * Whether this is meant to be JSON — an object, an array, or a bare string, each of which is a
-     * whole document.
-     *
-     * Decided on the decoded copy, because the shape can be hidden by encoding: a body beginning
-     * {@code %22secret_token%22} is JSON spelled sideways, and reading the raw first character sent
-     * it to the flat rules, where a field name means nothing. Anything else keeps its exact shape
-     * and goes to the flat rules, which is what they are for — run through the parser, a one-word
-     * error page would come back quoted.
-     */
-    private static boolean looksLikeJson(String aBody) {
-        String decoded = Decoded.of(aBody).text;
-        for (int i = 0; i < decoded.length(); i++) {
-            char c = decoded.charAt(i);
-            if (!Character.isWhitespace(c)) {
-                return c == '{' || c == '[' || c == '"';
-            }
-        }
-        return false;
-    }
 
     private static JsonElement scrubJson(JsonElement aElement, int aDepth) {
         if (aDepth > MAX_DEPTH) {
@@ -241,7 +260,10 @@ public final class TelegramLogScrubber {
             String value = aElement.getAsString();
             // A string whose contents are themselves JSON gets the same treatment as a body, or the
             // fields inside it would be invisible: the flat rules know a URL and a token, not a key.
-            return new JsonPrimitive(aDepth < MAX_DEPTH && looksLikeJson(value) ? scrubBody(value) : scrub(value));
+            // Only ever downwards, and on the shared depth budget: a top-level primitive never gets
+            // here, which is what keeps a body the lenient parser hands back unchanged from being
+            // handed to itself for ever.
+            return new JsonPrimitive(meantToBeJson(value) ? scrubBody(value, aDepth + 1) : scrub(value));
         }
         return aElement;
     }

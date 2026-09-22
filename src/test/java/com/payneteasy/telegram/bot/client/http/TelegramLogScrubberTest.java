@@ -108,6 +108,45 @@ public class TelegramLogScrubberTest {
         }
     }
 
+    /**
+     * What a body is, is the parser's answer. It is lenient — a byte order mark, a {@code )]}'}
+     * guard, a comment before the document — and guessing from the first character disagreed with
+     * it, sending a body it would have parsed to the flat rules where a field name means nothing.
+     */
+    @Test
+    public void whatCountsAsJsonIsWhatTheParserAccepts() {
+        for (String prefix : new String[] { "\ufeff", ")]}'\n", "/*prefix*/" }) {
+            String body = prefix + "{\"secret_token\":\"" + OPAQUE + "\"}";
+            assertFalse(body, scrubBody(body).contains(OPAQUE));
+        }
+    }
+
+    /**
+     * The lenient parser hands some strings back unchanged. Feeding such a body to itself is a
+     * StackOverflowError, which is an Error and escapes every handler meant to catch it.
+     */
+    @Test
+    public void aBodyIsNeverHandedToItself() {
+        for (String body : new String[] { "%22foo%22", "%7B%7D", "%22secret_token%22%3A%22" + OPAQUE + "%22" }) {
+            assertFalse(body, scrubBody(body).contains(OPAQUE));
+        }
+    }
+
+    /** One budget for the whole walk, strings inside strings included. */
+    @Test
+    public void nestingPastTheLimitIsMaskedAtTheLimit() {
+        StringBuilder deep = new StringBuilder();
+        for (int i = 0; i < 101; i++) {
+            deep.append("{\"a\":");
+        }
+        deep.append('"').append(SECRET).append('"');
+        for (int i = 0; i < 101; i++) {
+            deep.append('}');
+        }
+
+        assertFalse(scrubBody(deep.toString()).contains(SECRET));
+    }
+
     /** The shape can be hidden by encoding, and a bare string is a whole document too. */
     @Test
     public void aBodyIsRecognisedAsJsonWhateverItsSpelling() {
