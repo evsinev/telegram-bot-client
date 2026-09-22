@@ -161,6 +161,17 @@ public class TelegramLogScrubberTest {
         assertFalse(scrubBody("\"{\\\"secret_token\\\":\\\"" + OPAQUE + "\\\"}\"").contains(OPAQUE));
     }
 
+    /**
+     * A token sits inside the parameter value that holds it, and the value reaches further than
+     * the token does. The whole value has to go: masking the token alone leaves its frame behind,
+     * and replacing both in turn works on offsets the first replacement already invalidated.
+     */
+    @Test
+    public void theWholeParameterValueGoesEvenWhenATokenSitsInsideIt() {
+        assertEquals("https://h/?bot_token=***&next=keepme",
+                scrub("https://h/?bot_token=" + TOKEN + "&next=keepme"));
+    }
+
     /** Round 4: the secret's own characters encoded, not just the separator. */
     @Test
     public void anEncodedCharacterInsideTheSecretDoesNotHideIt() {
