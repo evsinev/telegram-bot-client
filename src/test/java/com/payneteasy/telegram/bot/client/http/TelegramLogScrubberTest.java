@@ -3,6 +3,7 @@ package com.payneteasy.telegram.bot.client.http;
 import org.junit.Test;
 
 import static com.payneteasy.telegram.bot.client.http.TelegramLogScrubber.scrub;
+import static com.payneteasy.telegram.bot.client.http.TelegramLogScrubber.scrubBody;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -68,6 +69,54 @@ public class TelegramLogScrubberTest {
         String scrubbed = scrub("https://gate.pne.io/hook?x=123456789%3A" + SECRET_PART);
 
         assertFalse(scrubbed.contains(SECRET_PART));
+    }
+
+    /**
+     * The four leaks the review of stage 1 reproduced. Each one used to come out in full.
+     */
+    @Test
+    public void anEncodedTokenNextToAPlainOneIsNotLeftBehind() {
+        String scrubbed = scrub(TOKEN + " encoded=123456789%3A" + SECRET_PART);
+
+        assertFalse(scrubbed.contains(SECRET_PART));
+    }
+
+    @Test
+    public void aStrayPercentDoesNotCostUsTheRestOfTheString() {
+        String scrubbed = scrub("100% done 123456789%3A" + SECRET_PART);
+
+        assertFalse(scrubbed.contains(SECRET_PART));
+    }
+
+    @Test
+    public void secondQueryParameterOfASerializedBodyIsScrubbed() {
+        String body = "{\"url\":\"https://h/hook?x\\u003d1\\u0026secret_token\\u003d" + SECRET + "\"}";
+
+        assertFalse(scrubBody(body).contains(SECRET));
+        assertFalse("and the flat fallback must hold it too", scrub(body).contains(SECRET));
+    }
+
+    @Test
+    public void bodyIsWalkedAsJsonSoEscapingCannotHideAField() {
+        String body = "{\"secret_\\u0074oken\":\"" + SECRET + "\",\"url\":\"https://h/hook?bot_token\\u003d" + TOKEN + "\"}";
+
+        String scrubbed = scrubBody(body);
+
+        assertFalse(scrubbed.contains(SECRET));
+        assertFalse(scrubbed.contains(SECRET_PART));
+        assertTrue("the readable part survives", scrubbed.contains("https://h/hook"));
+    }
+
+    @Test
+    public void aBodyThatDoesNotParseFallsBackToTheFlatRules() {
+        String truncated = "{\"url\":\"https://h/hook?bot_token=" + TOKEN;
+
+        assertFalse(scrubBody(truncated).contains(SECRET_PART));
+    }
+
+    @Test
+    public void plusSignIsNotTurnedIntoASpace() {
+        assertEquals("a+b c%ZZ", scrubBody("a+b c%ZZ"));
     }
 
     @Test

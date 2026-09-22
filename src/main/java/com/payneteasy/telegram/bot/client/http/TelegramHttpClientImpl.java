@@ -10,7 +10,9 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static com.payneteasy.telegram.bot.client.http.ScrubbedCause.sanitize;
 import static com.payneteasy.telegram.bot.client.http.TelegramLogScrubber.scrub;
+import static com.payneteasy.telegram.bot.client.http.TelegramLogScrubber.scrubBody;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 public class TelegramHttpClientImpl implements ITelegramHttpClient {
@@ -67,22 +69,41 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
     @Override
     public <T> T get(String aMethodName, Class<T> aResponseClass) {
         String id = nextCommandId();
-        try {
-            try (SimpleHttpClient client = new SimpleHttpClient()) {
-                client.connect(buildUrl(aMethodName), timeouts.getConnectionMs(), timeouts.getReadMs(), "GET");
-                sendHeaders(client);
-                LOG.debug("{} {}: request", id, aMethodName);
-                SimpleHttpResponse response = client.fetchResponse();
-                String             json        = new String(response.getBody(), UTF_8);
-                LOG.debug("{} {}: response {}", id, aMethodName, scrub(json));
-                if (response.getStatusCode() != 200) {
-                    throw new IllegalStateException(scrub(json));
-                }
-                return gson.fromJson(json, aResponseClass);
-            }
-        } catch (IOException e) {
-            throw new TelegramCommandException("Cannot invoke " + aMethodName, e, id, -1);
+
+        SimpleHttpResponse response;
+        String             json;
+        try (SimpleHttpClient client = new SimpleHttpClient()) {
+            client.connect(buildUrl(aMethodName), timeouts.getConnectionMs(), timeouts.getReadMs(), "GET");
+            sendHeaders(client);
+            LOG.debug("{} {}: request", id, aMethodName);
+            response = client.fetchResponse();
+            json     = new String(response.getBody(), UTF_8);
+            LOG.debug("{} {}: response {}", id, aMethodName, scrubBody(json));
+        } catch (IOException | RuntimeException e) {
+            throw cannotInvoke(aMethodName, id, e);
         }
+
+        if (response.getStatusCode() != 200) {
+            throw new IllegalStateException(scrubBody(json));
+        }
+
+        try {
+            return gson.fromJson(json, aResponseClass);
+        } catch (RuntimeException e) {
+            throw cannotInvoke(aMethodName, id, e);
+        }
+    }
+
+    /**
+     * Wraps whatever the call threw, message and cause scrubbed.
+     *
+     * The catch is deliberately wider than {@code IOException}: the body of an answer reaches a
+     * message by routes that are not IO at all — {@code gson.fromJson} names the offending value
+     * in a {@code NumberFormatException}, and {@code setRequestProperty} names the header value it
+     * rejected, which in HEADER mode is the token itself.
+     */
+    private TelegramCommandException cannotInvoke(String aMethodName, String aId, Throwable aCause) {
+        return new TelegramCommandException("Cannot invoke " + aMethodName + ": " + scrub(aCause.getMessage()), sanitize(aCause), aId, -1);
     }
 
     private String nextCommandId() {
@@ -96,7 +117,7 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
                 return error.getParameters().getRetryAfter();
             }
         } catch (Exception e) {
-            LOG.debug("Cannot parse error body for retry_after: {}", scrub(responseJson));
+            LOG.debug("Cannot parse error body for retry_after: {}", scrubBody(responseJson));
         }
         return null;
     }
@@ -108,23 +129,29 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
     }
 
     private  <R, T> T post(String id, String aMethodName, R aRequest, Class<T> aResponseClass) {
+        SimpleHttpResponse response;
+        String             responseJson;
+        try (SimpleHttpClient client = new SimpleHttpClient()) {
+            client.connect(buildUrl(aMethodName), timeouts.getConnectionMs(), timeouts.getReadMs(), "POST");
+            sendHeaders(client);
+            String requestJson = gson.toJson(aRequest);
+            LOG.debug("{} {}: request  {}", id, aMethodName, scrubBody(requestJson));
+            client.sendBody(requestJson.getBytes(UTF_8));
+            response     = client.fetchResponse();
+            responseJson = new String(response.getBody(), UTF_8);
+            LOG.debug("{} {}: response {}", id, aMethodName, scrubBody(responseJson));
+        } catch (IOException | RuntimeException e) {
+            throw cannotInvoke(aMethodName, id, e);
+        }
+
+        if (response.getStatusCode() != 200) {
+            throw new TelegramCommandException(scrubBody(responseJson), id, response.getStatusCode(), parseRetryAfter(responseJson));
+        }
+
         try {
-            try (SimpleHttpClient client = new SimpleHttpClient()) {
-                client.connect(buildUrl(aMethodName), timeouts.getConnectionMs(), timeouts.getReadMs(), "POST");
-                sendHeaders(client);
-                String requestJson = gson.toJson(aRequest);
-                LOG.debug("{} {}: request  {}", id, aMethodName, scrub(requestJson));
-                client.sendBody(requestJson.getBytes(UTF_8));
-                SimpleHttpResponse response = client.fetchResponse();
-                String             responseJson     = new String(response.getBody(), UTF_8);
-                LOG.debug("{} {}: response {}", id, aMethodName, scrub(responseJson));
-                if (response.getStatusCode() != 200) {
-                    throw new TelegramCommandException(scrub(responseJson), id, response.getStatusCode(), parseRetryAfter(responseJson));
-                }
-                return gson.fromJson(responseJson, aResponseClass);
-            }
-        } catch (IOException e) {
-            throw new TelegramCommandException("Cannot invoke " + aMethodName, e, id, -1);
+            return gson.fromJson(responseJson, aResponseClass);
+        } catch (RuntimeException e) {
+            throw cannotInvoke(aMethodName, id, e);
         }
     }
 

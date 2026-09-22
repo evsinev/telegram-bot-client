@@ -98,10 +98,10 @@ public class TelegramHttpClientTransportTest {
         service(TokenTransport.HEADER, baseUrl + "/telegram").sendMessage(message());
 
         RecordedRequest request = single();
-        assertEquals("/telegram/sendMessage", request.path);
+        assertEquals("the whole request target, query included", "/telegram/sendMessage", request.target);
         assertEquals("exactly one token header", 1, request.headers("X-Telegram-Bot-Token").size());
         assertEquals(TOKEN, request.headers("X-Telegram-Bot-Token").get(0));
-        assertFalse("no token in the request target", request.path.contains("123456789"));
+        assertFalse("no token in the request target", request.target.contains("123456789"));
     }
 
     @Test
@@ -123,7 +123,7 @@ public class TelegramHttpClientTransportTest {
         service(TokenTransport.URL, baseUrl + "/bot").sendMessage(message());
 
         RecordedRequest request = single();
-        assertEquals("/bot" + TOKEN + "/sendMessage", request.path);
+        assertEquals("/bot" + TOKEN + "/sendMessage", request.target);
         assertTrue("no token header in URL mode", request.headers("X-Telegram-Bot-Token").isEmpty());
     }
 
@@ -183,7 +183,7 @@ public class TelegramHttpClientTransportTest {
 
         assertTrue("the real body still reaches the server", single().body.contains(SECRET));
         assertNoSecretsInLogs();
-        assertTrue("the field is visible, its value is not", anyLogContains("\"secret_token\": \"***\""));
+        assertTrue("the field is visible, its value is not", anyLogContains("\"secret_token\":\"***\""));
     }
 
     /** The description of a well-formed error answer — TelegramHttpClientImpl:105. */
@@ -200,7 +200,83 @@ public class TelegramHttpClientTransportTest {
         }
     }
 
+    /** Not only that 429 is raised, but that the hint the client parsed comes out (P4.5). */
+    @Test
+    public void retryAfterOfAParsableErrorReachesTheCaller() {
+        responseStatus = 429;
+        responseBody   = "{\"ok\":false,\"error_code\":429,\"description\":\"Too Many Requests\",\"parameters\":{\"retry_after\":5}}";
+
+        try {
+            service(TokenTransport.URL, baseUrl + "/bot").sendMessage(message());
+            fail("429 must not be swallowed");
+        } catch (TelegramCommandException e) {
+            assertEquals(Integer.valueOf(429), e.getErrorCode());
+            assertEquals("the retry hint has to survive the trip", Integer.valueOf(5), e.getRetryAfter());
+        }
+    }
+
+    /**
+     * A 200 whose body does not fit the response class: the failure comes out of Gson, not out of
+     * IO, and Gson names the value it choked on — which here is the token.
+     */
+    @Test
+    public void malformedAnswerOnTwoHundredLeaksNothing() {
+        responseBody = "{\"ok\":false,\"error_code\":\"" + TOKEN + "\"}";
+
+        try {
+            service(TokenTransport.HEADER, baseUrl + "/telegram").setWebhook(new TelegramWebhookRequest("https://gate.pne.io/hook"));
+            fail("a body that does not fit the response class must not pass");
+        } catch (RuntimeException e) {
+            assertNoSecretsInChain(e);
+        }
+    }
+
+    /**
+     * A base address without a scheme: MalformedURLException names the whole URL, and in URL mode
+     * that URL holds the token. The cause travels out of the client, so it has to be scrubbed too.
+     */
+    @Test
+    public void causeChainOfAFailedCallLeaksNothing() {
+        try {
+            new TelegramServiceImpl(new TelegramHttpClientImpl(TelegramHttpClientConfig.builder()
+                    .baseUrl("bad/bot")
+                    .token(TOKEN)
+                    .build())).getMe();
+            fail("a malformed base address must not pass");
+        } catch (RuntimeException e) {
+            assertNoSecretsInChain(e);
+            assertTrue("the diagnosis must survive", renderChain(e).contains("MalformedURLException"));
+        }
+    }
+
+    /** A token that cannot go into a header at all — the failure names the value it rejected. */
+    @Test
+    public void rejectedHeaderValueLeaksNothing() {
+        try {
+            new TelegramServiceImpl(new TelegramHttpClientImpl(TelegramHttpClientConfig.builder()
+                    .baseUrl(baseUrl + "/telegram")
+                    .token(TOKEN + "\nX-Injected: 1")
+                    .tokenTransport(TokenTransport.HEADER)
+                    .build())).sendMessage(message());
+            fail("a header value with a line break must not pass");
+        } catch (RuntimeException e) {
+            assertNoSecretsInChain(e);
+        }
+    }
+
     // -----------------------------------------------------------------------
+
+    /** Renders the exception the way a scheduler would, so the whole chain is on trial. */
+    private static String renderChain(Throwable aThrowable) {
+        java.io.StringWriter writer = new java.io.StringWriter();
+        aThrowable.printStackTrace(new java.io.PrintWriter(writer));
+        return writer.toString();
+    }
+
+    private void assertNoSecretsInChain(Throwable aThrowable) {
+        assertNoSecrets("rendered exception chain", renderChain(aThrowable));
+        assertNoSecretsInLogs();
+    }
 
     private TelegramServiceImpl service(TokenTransport aTransport, String aBaseUrl) {
         return new TelegramServiceImpl(new TelegramHttpClientImpl(TelegramHttpClientConfig.builder()
@@ -253,12 +329,12 @@ public class TelegramHttpClientTransportTest {
 
     private static final class RecordedRequest {
 
-        private final String                            path;
+        private final String                            target;
         private final com.sun.net.httpserver.Headers    headers;
         private final String                            body;
 
         private RecordedRequest(HttpExchange aExchange) throws IOException {
-            path    = aExchange.getRequestURI().getPath();
+            target  = aExchange.getRequestURI().toString();
             headers = aExchange.getRequestHeaders();
             body    = new String(org.apache.commons.io.IOUtils.toByteArray(aExchange.getRequestBody()), UTF_8);
         }

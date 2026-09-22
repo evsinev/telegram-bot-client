@@ -39,14 +39,21 @@ public class TelegramWebhookRequestSerializationTest {
     }
 
     /**
-     * The path {@code clearWebhook} takes: it must still compile and still send the old body.
+     * The path {@code clearWebhook} takes. Checked on a non-empty URL as well, or an
+     * implementation that forwarded a constant {@code ""} would pass.
      */
     @Test
     public void singleArgumentConstructorSendsTheFormerBody() {
-        TelegramWebhookRequest request = new TelegramWebhookRequest("");
+        TelegramWebhookRequest cleared = new TelegramWebhookRequest("");
 
-        assertNull(request.getSecretToken());
-        assertEquals("{\"url\":\"\"}", GSON.toJson(request));
+        assertNull(cleared.getSecretToken());
+        assertEquals("{\"url\":\"\"}", GSON.toJson(cleared));
+
+        TelegramWebhookRequest set = new TelegramWebhookRequest(URL);
+
+        assertNull(set.getSecretToken());
+        assertEquals("[url]", keysOf(serialize(set)));
+        assertEquals(URL, serialize(set).get("url").getAsString());
     }
 
     private static JsonObject serialize(TelegramWebhookRequest aRequest) {
