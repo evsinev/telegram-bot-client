@@ -88,14 +88,15 @@ public final class TelegramLogScrubber {
     }
 
     /**
-     * What a body is gets decided by the parser, not by guessing from its first character. The
-     * parser is lenient — it accepts a byte order mark, a {@code )]}'} guard, a comment before the
-     * document — and a guess that disagreed with it sent a body it would have parsed to the flat
-     * rules, where a field name means nothing.
+     * Either it walks as an object or an array, or it is not logged. There is no guess about what
+     * the body was meant to be: every guess so far has disagreed with the parser somewhere — the
+     * first character, a byte order mark, a comment before the document — and each disagreement
+     * was a body going to the flat rules, where a field name means nothing.
      *
-     * Anything that is not an object or an array is either a bare string document or plain text
-     * the lenient parser swallowed, and those cannot be told apart reliably. So: if it was meant
-     * to be JSON and we could not walk it, it is withheld; otherwise the flat rules apply.
+     * The cost is that an HTML error page from an intermediary is withheld along with everything
+     * else. That is the same trade the proxy at the other end of this connection makes, for the
+     * same reason: a `secret_token` is identified by the name of its key and by nothing else, so
+     * without the structure there is nothing dependable left to look for.
      */
     private static String scrubBody(String aBody, int aDepth) {
         if (aBody == null || aBody.isEmpty()) {
@@ -105,17 +106,8 @@ public final class TelegramLogScrubber {
             return withheld(aBody);
         }
 
-        try {
-            JsonElement parsed = new JsonParser().parse(aBody);
-            if (parsed.isJsonObject() || parsed.isJsonArray()) {
-                return scrubJson(parsed, aDepth).toString();
-            }
-        } catch (RuntimeException e) {
-            // Truncated, or deeper than the parser will go - handled below like anything else we
-            // could not walk.
-        }
-
-        return meantToBeJson(aBody) ? withheld(aBody) : scrub(aBody);
+        JsonElement parsed = parseOrNull(aBody);
+        return parsed == null ? withheld(aBody) : scrubJson(parsed, aDepth).toString();
     }
 
     /**
@@ -128,19 +120,14 @@ public final class TelegramLogScrubber {
         return "<unparsable body, " + aBody.length() + " chars, withheld>";
     }
 
-    /**
-     * Whether this was meant to be a JSON document, decided on the decoded copy: the shape can be
-     * hidden by encoding, and a body beginning {@code %22secret_token%22} is JSON spelled sideways.
-     */
-    private static boolean meantToBeJson(String aBody) {
-        String decoded = Decoded.of(aBody).text;
-        for (int i = 0; i < decoded.length(); i++) {
-            char c = decoded.charAt(i);
-            if (!Character.isWhitespace(c) && c != '\ufeff') {
-                return c == '{' || c == '[' || c == '"';
-            }
+    /** @return the parsed object or array, or null when it is neither or will not parse */
+    private static JsonElement parseOrNull(String aText) {
+        try {
+            JsonElement parsed = new JsonParser().parse(aText);
+            return parsed.isJsonObject() || parsed.isJsonArray() ? parsed : null;
+        } catch (RuntimeException e) {
+            return null;
         }
-        return false;
     }
 
     /**
@@ -260,10 +247,12 @@ public final class TelegramLogScrubber {
             String value = aElement.getAsString();
             // A string whose contents are themselves JSON gets the same treatment as a body, or the
             // fields inside it would be invisible: the flat rules know a URL and a token, not a key.
-            // Only ever downwards, and on the shared depth budget: a top-level primitive never gets
-            // here, which is what keeps a body the lenient parser hands back unchanged from being
-            // handed to itself for ever.
-            return new JsonPrimitive(meantToBeJson(value) ? scrubBody(value, aDepth + 1) : scrub(value));
+            // Only a string that really is an object or an array, and only ever downwards on the
+            // shared budget: a top-level primitive never gets here, which is what keeps a body the
+            // lenient parser hands back unchanged from being handed to itself for ever. A string
+            // that is merely text keeps its diagnosis and goes through the flat rules.
+            JsonElement nested = aDepth < MAX_DEPTH ? parseOrNull(value) : null;
+            return new JsonPrimitive(nested == null ? scrub(value) : scrubJson(nested, aDepth + 1).toString());
         }
         return aElement;
     }

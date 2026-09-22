@@ -55,6 +55,23 @@ public class ScrubbedCauseTest {
         assertNull("the cycle has to stop somewhere", scrubbed.getCause().getCause());
     }
 
+    /**
+     * A parser quotes the fragment it choked on, and that fragment is a piece of the body. The
+     * flat rules cannot help — a key name needs structure — so for that path the text goes and the
+     * types and stacks stay.
+     */
+    @Test
+    public void typeOnlyKeepsTheDiagnosisAndNoneOfTheText() {
+        Exception root  = new NumberFormatException("For input string: \"{\"secret_token\":\"a-secret\"}\"");
+        Exception outer = new IllegalStateException("wrapping " + TOKEN, root);
+
+        ScrubbedCause scrubbed = ScrubbedCause.typeOnly(outer);
+
+        assertEquals("java.lang.IllegalStateException", scrubbed.getMessage());
+        assertEquals("java.lang.NumberFormatException", scrubbed.getCause().getMessage());
+        assertEquals(outer.getStackTrace().length, scrubbed.getStackTrace().length);
+    }
+
     @Test
     public void nothingToCopyIsNotAFailure() {
         assertNull(ScrubbedCause.sanitize(null));

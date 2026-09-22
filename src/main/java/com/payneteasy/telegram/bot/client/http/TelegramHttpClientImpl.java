@@ -92,7 +92,7 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
         try {
             return gson.fromJson(json, aResponseClass);
         } catch (RuntimeException e) {
-            throw cannotInvoke(aMethodName, id, e);
+            throw cannotParse(aMethodName, id, e);
         }
     }
 
@@ -104,6 +104,17 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
      * in a {@code NumberFormatException}, and {@code setRequestProperty} names the header value it
      * rejected, which in HEADER mode is the token itself.
      */
+    /**
+     * A failure to turn the answer into a response class. The parser quotes the fragment it choked
+     * on, which is a piece of the body, so neither its text nor its cause's text comes along: the
+     * body is in the log already, walked or withheld, and the type names and stacks are what say
+     * what went wrong.
+     */
+    private TelegramCommandException cannotParse(String aMethodName, String aId, Throwable aCause) {
+        return new TelegramCommandException("Cannot parse the answer of " + aMethodName,
+                ScrubbedCause.typeOnly(aCause), aId, -1);
+    }
+
     private TelegramCommandException cannotInvoke(String aMethodName, String aId, Throwable aCause) {
         return new TelegramCommandException("Cannot invoke " + aMethodName + ": " + scrub(aCause.getMessage()), sanitize(aCause), aId, -1);
     }
@@ -159,7 +170,7 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
         try {
             return gson.fromJson(responseJson, aResponseClass);
         } catch (RuntimeException e) {
-            throw cannotInvoke(aMethodName, id, e);
+            throw cannotParse(aMethodName, id, e);
         }
     }
 

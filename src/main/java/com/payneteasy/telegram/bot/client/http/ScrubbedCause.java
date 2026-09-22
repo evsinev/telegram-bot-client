@@ -30,6 +30,28 @@ class ScrubbedCause extends RuntimeException {
     }
 
     /**
+     * The same, with every message dropped rather than scrubbed.
+     *
+     * For a failure to turn an answer into a response class: the parser quotes the fragment it
+     * choked on, and that fragment is a piece of the body. The flat rules cannot help — a
+     * `secret_token` is known by the name of its key, and a fragment has no structure — so the
+     * text goes and the type names and stacks stay. The body itself is already in the log, walked
+     * or withheld.
+     */
+    static ScrubbedCause typeOnly(Throwable aCause) {
+        if (aCause == null) {
+            return null;
+        }
+        ScrubbedCause copy = new ScrubbedCause(aCause.getClass().getName(), typeOnly(aCause.getCause()));
+        copy.setStackTrace(aCause.getStackTrace());
+        return copy;
+    }
+
+    private ScrubbedCause(String aMessage, ScrubbedCause aCause) {
+        super(aMessage, aCause, false, true);
+    }
+
+    /**
      * A cause chain is allowed to be a cycle — {@code a.initCause(b); b.initCause(a)} is legal —
      * and walking one without remembering where we have been turns a failed call into a
      * StackOverflowError, which is an Error and so escapes every handler meant to catch this.

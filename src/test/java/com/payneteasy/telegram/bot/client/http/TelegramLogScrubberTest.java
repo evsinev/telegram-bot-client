@@ -122,6 +122,32 @@ public class TelegramLogScrubberTest {
     }
 
     /**
+     * No guess about what the body was meant to be: every guess so far disagreed with the parser
+     * somewhere, and each disagreement was a body going to the flat rules where a field name means
+     * nothing. It walks as an object or an array, or it is not logged.
+     */
+    @Test
+    public void aBodyThatDoesNotWalkIsNeverLogged() {
+        for (String body : new String[] {
+                "/*prefix*/{\"secret_token\":\"" + OPAQUE,
+                "\ufeff{\"secret_token\":\"" + OPAQUE,
+                ")]}'\n{\"secret_token\":\"" + OPAQUE,
+                "<html>" + OPAQUE + "</html>",
+        }) {
+            String scrubbed = scrubBody(body);
+            assertFalse(scrubbed, scrubbed.contains(OPAQUE));
+            assertTrue(scrubbed, scrubbed.contains("withheld"));
+        }
+    }
+
+    /** A string that is merely text keeps its diagnosis rather than being withheld. */
+    @Test
+    public void aStringThatIsNotJsonKeepsItsText() {
+        assertEquals("{\"description\":\"Bad Request: chat not found\"}",
+                scrubBody("{\"description\":\"Bad Request: chat not found\"}"));
+    }
+
+    /**
      * The lenient parser hands some strings back unchanged. Feeding such a body to itself is a
      * StackOverflowError, which is an Error and escapes every handler meant to catch it.
      */
