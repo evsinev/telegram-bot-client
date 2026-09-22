@@ -18,7 +18,7 @@ public class SimpleHttpClient implements Closeable {
     private InputStream       inputStream;
 
     public void connect(String aUrl, int aConnectionTimeoutMs, int aReadTimeoutMs, String aMethod) throws IOException {
-        LOG.debug("Sending {} to {} with {}ms, {}ms ...", aMethod, aUrl, aConnectionTimeoutMs, aReadTimeoutMs);
+        LOG.debug("Sending {} to {} with {}ms, {}ms ...", aMethod, TelegramLogScrubber.scrub(aUrl), aConnectionTimeoutMs, aReadTimeoutMs);
         connection = (HttpURLConnection) new URL(aUrl).openConnection();
         connection.setReadTimeout(aReadTimeoutMs);
         connection.setConnectTimeout(aConnectionTimeoutMs);
