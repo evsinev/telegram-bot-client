@@ -232,6 +232,24 @@ public class TelegramHttpClientTransportTest {
     }
 
     /**
+     * The parser quotes the fragment it choked on, and that fragment is a piece of the body. Here
+     * it is a webhook secret rather than a token, so nothing about its shape would save it — only
+     * dropping the parser's text does.
+     */
+    @Test
+    public void aParseFailureDoesNotCarryTheFragmentItChokedOn() {
+        responseBody = "{\"ok\":false,\"error_code\":\"{\\\"secret_token\\\":\\\"" + SECRET + "\\\"}\"}";
+
+        try {
+            service(TokenTransport.HEADER, baseUrl + "/telegram").setWebhook(new TelegramWebhookRequest("https://h/hook"));
+            fail("a body that does not fit the response class must not pass");
+        } catch (RuntimeException e) {
+            assertNoSecretsInChain(e);
+            assertTrue("the diagnosis has to survive", renderChain(e).contains("Cannot parse the answer"));
+        }
+    }
+
+    /**
      * A base address without a scheme: MalformedURLException names the whole URL, and in URL mode
      * that URL holds the token. The cause travels out of the client, so it has to be scrubbed too.
      */
