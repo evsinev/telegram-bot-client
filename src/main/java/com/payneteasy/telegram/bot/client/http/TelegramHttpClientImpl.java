@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static com.payneteasy.telegram.bot.client.http.TelegramLogScrubber.scrub;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 public class TelegramHttpClientImpl implements ITelegramHttpClient {
@@ -18,19 +19,49 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
 
     private final String             baseUrl;
     private final String             token;
+    private final TokenTransport     tokenTransport;
+    private final String             tokenHeaderName;
     private final HttpClientTimeouts timeouts;
     private final Gson               gson;
     private final AtomicLong         commandId = new AtomicLong();
 
+    public TelegramHttpClientImpl(TelegramHttpClientConfig aConfig) {
+        this.baseUrl         = aConfig.getBaseUrl();
+        this.token           = aConfig.getToken();
+        this.tokenTransport  = aConfig.getTokenTransport();
+        this.tokenHeaderName = aConfig.getTokenHeaderName();
+        this.timeouts        = aConfig.getTimeouts();
+        this.gson            = aConfig.getGson();
+    }
+
     public TelegramHttpClientImpl(String baseUrl, String token, HttpClientTimeouts timeouts, Gson gson) {
-        this.baseUrl = baseUrl;
-        this.token = token;
-        this.timeouts = timeouts;
-        this.gson = gson;
+        this(TelegramHttpClientConfig.builder()
+                .baseUrl(baseUrl)
+                .token(token)
+                .timeouts(timeouts)
+                .gson(gson)
+                .build());
     }
 
     public TelegramHttpClientImpl(String token) {
         this("https://api.telegram.org/bot", token, new HttpClientTimeouts(30_000, 30_000, 30_000), new GsonBuilder().setPrettyPrinting().create());
+    }
+
+    /**
+     * {@link TokenTransport#URL} keeps the address Telegram expects; {@link TokenTransport#HEADER}
+     * leaves the token out of it entirely — there is nothing secret left in the request target.
+     */
+    String buildUrl(String aMethodName) {
+        return tokenTransport == TokenTransport.HEADER
+                ? baseUrl + "/" + aMethodName
+                : baseUrl + token + "/" + aMethodName;
+    }
+
+    private void sendHeaders(SimpleHttpClient aClient) {
+        aClient.sendHeader("Content-Type", "application/json");
+        if (tokenTransport == TokenTransport.HEADER) {
+            aClient.sendHeader(tokenHeaderName, token);
+        }
     }
 
     @Override
@@ -38,14 +69,14 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
         String id = nextCommandId();
         try {
             try (SimpleHttpClient client = new SimpleHttpClient()) {
-                client.connect(baseUrl + token + "/" + aMethodName, timeouts.getConnectionMs(), timeouts.getReadMs(), "GET");
-                client.sendHeader("Content-Type", "application/json");
+                client.connect(buildUrl(aMethodName), timeouts.getConnectionMs(), timeouts.getReadMs(), "GET");
+                sendHeaders(client);
                 LOG.debug("{} {}: request", id, aMethodName);
                 SimpleHttpResponse response = client.fetchResponse();
                 String             json        = new String(response.getBody(), UTF_8);
-                LOG.debug("{} {}: response {}", id, aMethodName, json);
+                LOG.debug("{} {}: response {}", id, aMethodName, scrub(json));
                 if (response.getStatusCode() != 200) {
-                    throw new IllegalStateException(json);
+                    throw new IllegalStateException(scrub(json));
                 }
                 return gson.fromJson(json, aResponseClass);
             }
@@ -65,7 +96,7 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
                 return error.getParameters().getRetryAfter();
             }
         } catch (Exception e) {
-            LOG.debug("Cannot parse error body for retry_after: {}", responseJson);
+            LOG.debug("Cannot parse error body for retry_after: {}", scrub(responseJson));
         }
         return null;
     }
@@ -79,16 +110,16 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
     private  <R, T> T post(String id, String aMethodName, R aRequest, Class<T> aResponseClass) {
         try {
             try (SimpleHttpClient client = new SimpleHttpClient()) {
-                client.connect(baseUrl + token + "/" + aMethodName, timeouts.getConnectionMs(), timeouts.getReadMs(), "POST");
-                client.sendHeader("Content-Type", "application/json");
+                client.connect(buildUrl(aMethodName), timeouts.getConnectionMs(), timeouts.getReadMs(), "POST");
+                sendHeaders(client);
                 String requestJson = gson.toJson(aRequest);
-                LOG.debug("{} {}: request  {}", id, aMethodName, requestJson);
+                LOG.debug("{} {}: request  {}", id, aMethodName, scrub(requestJson));
                 client.sendBody(requestJson.getBytes(UTF_8));
                 SimpleHttpResponse response = client.fetchResponse();
                 String             responseJson     = new String(response.getBody(), UTF_8);
-                LOG.debug("{} {}: response {}", id, aMethodName, responseJson);
+                LOG.debug("{} {}: response {}", id, aMethodName, scrub(responseJson));
                 if (response.getStatusCode() != 200) {
-                    throw new TelegramCommandException(responseJson, id, response.getStatusCode(), parseRetryAfter(responseJson));
+                    throw new TelegramCommandException(scrub(responseJson), id, response.getStatusCode(), parseRetryAfter(responseJson));
                 }
                 return gson.fromJson(responseJson, aResponseClass);
             }
@@ -102,7 +133,7 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
         String id = nextCommandId();
         TelegramStandardResponse response = post(id, aMethodName, aRequest, TelegramStandardResponse.class);
         if(!response.isOk()) {
-            throw new TelegramCommandException(response.getDescription(), id, response.getErrorCode());
+            throw new TelegramCommandException(scrub(response.getDescription()), id, response.getErrorCode());
         }
     }
 }
