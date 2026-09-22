@@ -232,6 +232,22 @@ public class TelegramHttpClientTransportTest {
     }
 
     /**
+     * The description of a refusal is a piece of the body, not prose of ours. Telegram putting a
+     * structure there must be walked; it reaches the caller as the message of the exception.
+     */
+    @Test
+    public void aDescriptionThatIsAStructureIsWalkedNotFlattened() {
+        responseBody = "{\"ok\":false,\"error_code\":400,\"description\":\"{\\\"secret_token\\\":\\\"" + SECRET + "\\\"}\"}";
+
+        try {
+            service(TokenTransport.HEADER, baseUrl + "/telegram").setWebhook(new TelegramWebhookRequest("https://h/hook"));
+            fail("ok=false must not be swallowed");
+        } catch (TelegramCommandException e) {
+            assertNoSecretsInChain(e);
+        }
+    }
+
+    /**
      * The parser quotes the fragment it choked on, and that fragment is a piece of the body. Here
      * it is a webhook secret rather than a token, so nothing about its shape would save it — only
      * dropping the parser's text does.

@@ -39,10 +39,16 @@ class ScrubbedCause extends RuntimeException {
      * or withheld.
      */
     static ScrubbedCause typeOnly(Throwable aCause) {
-        if (aCause == null) {
+        return typeOnly(aCause, new IdentityHashMap<Throwable, Boolean>());
+    }
+
+    private static ScrubbedCause typeOnly(Throwable aCause, Map<Throwable, Boolean> aSeen) {
+        // A cause chain is allowed to be a cycle, and walking one without remembering where we have
+        // been turns a failed call into a StackOverflowError - an Error, past every handler.
+        if (aCause == null || aSeen.put(aCause, Boolean.TRUE) != null) {
             return null;
         }
-        ScrubbedCause copy = new ScrubbedCause(aCause.getClass().getName(), typeOnly(aCause.getCause()));
+        ScrubbedCause copy = new ScrubbedCause(aCause.getClass().getName(), typeOnly(aCause.getCause(), aSeen));
         copy.setStackTrace(aCause.getStackTrace());
         return copy;
     }

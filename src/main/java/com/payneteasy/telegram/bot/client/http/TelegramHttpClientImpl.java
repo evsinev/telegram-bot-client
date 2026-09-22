@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static com.payneteasy.telegram.bot.client.http.ScrubbedCause.sanitize;
 import static com.payneteasy.telegram.bot.client.http.TelegramLogScrubber.scrub;
 import static com.payneteasy.telegram.bot.client.http.TelegramLogScrubber.scrubBody;
+import static com.payneteasy.telegram.bot.client.http.TelegramLogScrubber.scrubFragment;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 public class TelegramHttpClientImpl implements ITelegramHttpClient {
@@ -179,7 +180,9 @@ public class TelegramHttpClientImpl implements ITelegramHttpClient {
         String id = nextCommandId();
         TelegramStandardResponse response = post(id, aMethodName, aRequest, TelegramStandardResponse.class);
         if(!response.isOk()) {
-            throw new TelegramCommandException(scrub(response.getDescription()), id, response.getErrorCode());
+            // The description is a piece of the body, not free text of ours: if Telegram put a
+            // structure there it gets walked, and only genuine prose goes through the flat rules.
+            throw new TelegramCommandException(scrubFragment(response.getDescription()), id, response.getErrorCode());
         }
     }
 }

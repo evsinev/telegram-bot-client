@@ -120,6 +120,44 @@ public final class TelegramLogScrubber {
         return "<unparsable body, " + aBody.length() + " chars, withheld>";
     }
 
+    /**
+     * A string inside a body that walked.
+     *
+     * Three outcomes, and which one applies is decided by the parser wherever it can be: a string
+     * that is an object or an array is walked like the body it is; a string that was written as one
+     * and did not parse is withheld, exactly as the same text standing alone would be; anything
+     * else is text, keeps its diagnosis and goes through the flat rules.
+     *
+     * The opening-brace test is a guess, and for a body it was the wrong tool — the parser accepts
+     * things it does not predict. Here it is bounded: a wrong yes costs one field's text, where for
+     * a body it decided whether a secret was printed.
+     */
+    public static String scrubFragment(String aValue) {
+        return aValue == null || aValue.isEmpty() ? aValue : scrubStringValue(aValue, 0);
+    }
+
+    private static String scrubStringValue(String aValue, int aDepth) {
+        // No depth guard of its own: every path below either masks, withholds, or hands the value
+        // to scrubJson, which has one. A branch no test can tell apart is worse than no branch.
+        JsonElement nested = parseOrNull(aValue);
+        if (nested != null) {
+            return scrubJson(nested, aDepth + 1).toString();
+        }
+        return writtenAsJson(aValue) ? withheld(aValue) : scrub(aValue);
+    }
+
+    /** Whether the text opens as an object or an array, encoding undone. */
+    private static boolean writtenAsJson(String aText) {
+        String decoded = Decoded.of(aText).text;
+        for (int i = 0; i < decoded.length(); i++) {
+            char c = decoded.charAt(i);
+            if (!Character.isWhitespace(c) && c != '\ufeff') {
+                return c == '{' || c == '[';
+            }
+        }
+        return false;
+    }
+
     /** @return the parsed object or array, or null when it is neither or will not parse */
     private static JsonElement parseOrNull(String aText) {
         try {
@@ -160,9 +198,16 @@ public final class TelegramLogScrubber {
     /** {@code ?token=...}, up to where the query value ends in the original text. */
     private static void collectParams(List<Span> aSpans, String aOriginal, Decoded aDecoded) {
         Matcher matcher = SENSITIVE_PARAM_MARKER.matcher(aDecoded.text);
+        int     scanned = 0;
+
         while (matcher.find()) {
             int from = aDecoded.origin[matcher.end()];
-            aSpans.add(new Span(aDecoded.origin[matcher.start()], from, endOfQueryValue(aOriginal, from), ""));
+            // Markers come in order, and the last scan found no terminator before where it stopped,
+            // so there is none to find there now either. Without this a string of thousands of
+            // markers makes each one walk everything after it: 16 000 of them took two seconds.
+            int end  = endOfQueryValue(aOriginal, Math.max(from, scanned));
+            scanned  = end;
+            aSpans.add(new Span(aDecoded.origin[matcher.start()], from, end, ""));
         }
     }
 
@@ -211,14 +256,9 @@ public final class TelegramLogScrubber {
         return aText.length();
     }
 
-    /**
-     * A {@code ?} ends a value too. It is not legal to start a second query, so a string carrying
-     * thousands of them is malformed - and without this each marker would rescan everything after
-     * it, which on 16 000 of them took two seconds.
-     */
+    /** A {@code ?} is an ordinary character inside a query (RFC 3986 §3.4), so it ends nothing. */
     private static boolean endsValue(char aChar) {
-        return aChar == '&' || aChar == '?' || aChar == '\'' || aChar == '<' || aChar == '>'
-                || Character.isWhitespace(aChar);
+        return aChar == '&' || aChar == '\'' || aChar == '<' || aChar == '>' || Character.isWhitespace(aChar);
     }
 
 
@@ -247,12 +287,7 @@ public final class TelegramLogScrubber {
             String value = aElement.getAsString();
             // A string whose contents are themselves JSON gets the same treatment as a body, or the
             // fields inside it would be invisible: the flat rules know a URL and a token, not a key.
-            // Only a string that really is an object or an array, and only ever downwards on the
-            // shared budget: a top-level primitive never gets here, which is what keeps a body the
-            // lenient parser hands back unchanged from being handed to itself for ever. A string
-            // that is merely text keeps its diagnosis and goes through the flat rules.
-            JsonElement nested = aDepth < MAX_DEPTH ? parseOrNull(value) : null;
-            return new JsonPrimitive(nested == null ? scrub(value) : scrubJson(nested, aDepth + 1).toString());
+            return new JsonPrimitive(scrubStringValue(value, aDepth));
         }
         return aElement;
     }

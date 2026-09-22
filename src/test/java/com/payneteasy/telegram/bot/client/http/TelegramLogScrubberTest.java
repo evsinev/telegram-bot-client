@@ -4,6 +4,7 @@ import org.junit.Test;
 
 import static com.payneteasy.telegram.bot.client.http.TelegramLogScrubber.scrub;
 import static com.payneteasy.telegram.bot.client.http.TelegramLogScrubber.scrubBody;
+import static com.payneteasy.telegram.bot.client.http.TelegramLogScrubber.scrubFragment;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -140,6 +141,36 @@ public class TelegramLogScrubberTest {
         }
     }
 
+    /** A string field written as JSON gets the same treatment standing alone or nested. */
+    @Test
+    public void truncatedJsonInAStringFieldIsWithheldLikeABody() {
+        String body = "{\"payload\":\"{\\\"secret_token\\\":\\\"" + OPAQUE + "\\\"\"}";
+
+        assertFalse(body, scrubBody(body).contains(OPAQUE));
+    }
+
+    /** At the limit the value is masked, not handed to rules that cannot see a key. */
+    @Test
+    public void aStringAtTheDepthLimitIsMaskedRatherThanFlattened() {
+        StringBuilder deep = new StringBuilder();
+        for (int i = 0; i < 100; i++) {
+            deep.append('[');
+        }
+        deep.append("\"{\\\"secret_token\\\":\\\"").append(OPAQUE).append("\\\"}\"");
+        for (int i = 0; i < 100; i++) {
+            deep.append(']');
+        }
+
+        assertFalse(scrubBody(deep.toString()).contains(OPAQUE));
+    }
+
+    /** A description is a piece of the body, so a structure put there is walked, not flattened. */
+    @Test
+    public void aFragmentIsWalkedWhenItIsAStructureAndKeptWhenItIsProse() {
+        assertFalse(scrubFragment("{\"secret_token\":\"" + OPAQUE + "\"}").contains(OPAQUE));
+        assertEquals("Bad Request: chat not found", scrubFragment("Bad Request: chat not found"));
+    }
+
     /** A string that is merely text keeps its diagnosis rather than being withheld. */
     @Test
     public void aStringThatIsNotJsonKeepsItsText() {
@@ -220,12 +251,32 @@ public class TelegramLogScrubberTest {
     }
 
     /**
-     * Thousands of markers used to make each one rescan everything after it. A `?` cannot start a
-     * second query, so it ends a value.
+     * A {@code ?} is an ordinary character inside a query (RFC 3986 §3.4), so the value runs past
+     * it to the next real delimiter. An earlier version ended the value there to keep thousands of
+     * markers from each rescanning the rest, and let the tail of this one out.
      */
     @Test
-    public void aValueEndsAtTheNextQuestionMark() {
-        assertEquals("https://h/?token=***?token=***", scrub("https://h/?token=a?token=" + OPAQUE));
+    public void aQuestionMarkInsideAValueDoesNotEndIt() {
+        assertEquals("https://h/?token=***&x=keep", scrub("https://h/?token=foo?" + OPAQUE + "&x=keep"));
+    }
+
+    /** The same string of markers, now cheap because each scan resumes where the last one stopped. */
+    @Test
+    public void thousandsOfMarkersDoNotCostQuadraticTime() {
+        StringBuilder many = new StringBuilder();
+        for (int i = 0; i < 60_000; i++) {
+            many.append("?token=");
+        }
+        many.append(OPAQUE);
+
+        long started = System.nanoTime();
+        String scrubbed = scrub(many.toString());
+        long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+
+        assertFalse(scrubbed, scrubbed.contains(OPAQUE));
+        // Linear takes tens of milliseconds here and quadratic tens of seconds, so the threshold
+        // sits between two orders of magnitude rather than beside a measurement.
+        assertTrue("took " + elapsedMs + "ms, which is the quadratic scan back", elapsedMs < 5_000);
     }
 
     @Test
