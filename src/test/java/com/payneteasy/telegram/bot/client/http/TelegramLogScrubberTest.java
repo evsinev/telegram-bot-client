@@ -171,6 +171,37 @@ public class TelegramLogScrubberTest {
         assertEquals("Bad Request: chat not found", scrubFragment("Bad Request: chat not found"));
     }
 
+    /**
+     * A fragment the parser does not take, but which names the secret field, is withheld whatever
+     * comes before it. Deciding by the first character let each of these out as prose.
+     */
+    @Test
+    public void aFragmentThatDoesNotWalkButNamesTheSecretIsWithheld() {
+        for (String fragment : new String[] {
+                "/*prefix*/{\"secret_token\":\"" + OPAQUE + "\"",
+                ")]}'\n{\"secret_token\":\"" + OPAQUE + "\"",
+                "%EF%BB%BF%7B%22secret_token%22:%22" + OPAQUE + "%22%7D",
+                "note: secret%5Ftoken=" + OPAQUE,
+                "SECRET_TOKEN: " + OPAQUE,
+        }) {
+            assertEquals(fragment, "<unparsable body, " + fragment.length() + " chars, withheld>", scrubFragment(fragment));
+        }
+    }
+
+    /** The same fragments inside a body that walks: the DEBUG record of the response. */
+    @Test
+    public void aStringFieldThatDoesNotWalkButNamesTheSecretIsWithheld() {
+        for (String description : new String[] {
+                "/*prefix*/{\\\"secret_token\\\":\\\"" + OPAQUE + "\\\"",
+                "%EF%BB%BF%7B%22secret_token%22:%22" + OPAQUE + "%22%7D",
+        }) {
+            String body = "{\"ok\":false,\"error_code\":400,\"description\":\"" + description + "\"}";
+            String scrubbed = scrubBody(body);
+            assertFalse(scrubbed, scrubbed.contains(OPAQUE));
+            assertTrue("the rest of the body stays readable: " + scrubbed, scrubbed.contains("\"error_code\":400"));
+        }
+    }
+
     /** A string that is merely text keeps its diagnosis rather than being withheld. */
     @Test
     public void aStringThatIsNotJsonKeepsItsText() {
@@ -258,6 +289,66 @@ public class TelegramLogScrubberTest {
     @Test
     public void aQuestionMarkInsideAValueDoesNotEndIt() {
         assertEquals("https://h/?token=***&x=keep", scrub("https://h/?token=foo?" + OPAQUE + "&x=keep"));
+    }
+
+    /** An apostrophe is one of the sub-delims a query may carry (RFC 3986 §3.4), not its end. */
+    @Test
+    public void anApostropheInsideAValueDoesNotEndIt() {
+        assertEquals("https://h/?token=***&x=keep", scrub("https://h/?token=foo'" + OPAQUE + "&x=keep"));
+        assertEquals("https://h/?secret_token=***&x=keep", scrub("https://h/?secret_token=foo'" + OPAQUE + "&x=keep"));
+    }
+
+    /** A secret whose own characters are encoded is found in the decoded copy. */
+    @Test
+    public void aTokenWithEncodedCharactersIsStillFound() {
+        assertEquals("123456789:***", scrub("123456789%3A%41" + SECRET_PART.substring(1)));
+    }
+
+    /** An encoded equals sign is part of the name, so {@code token%3Dpublic} is not a token parameter. */
+    @Test
+    public void anEncodedDelimiterIsDataNotStructure() {
+        assertEquals("https://h/?token%3Dpublic=value", scrub("https://h/?token%3Dpublic=value"));
+    }
+
+    /** A JSON escape is Gson's spelling of a real ampersand: it ends the value and the neighbour stays. */
+    @Test
+    public void aJsonEscapedAmpersandEndsTheValue() {
+        assertEquals("https://h/?token=***\\u0026x=keep", scrub("https://h/?token=" + OPAQUE + "\\u0026x=keep"));
+    }
+
+    /**
+     * Strings inside strings spend the same budget as the structure around them. Here the
+     * structure alone takes the walk to the limit, and the value is masked for depth, not by name.
+     */
+    @Test
+    public void aStringInsideAStringSpendsTheSameDepthBudget() {
+        StringBuilder deep = new StringBuilder();
+        for (int i = 0; i < 99; i++) {
+            deep.append('[');
+        }
+        deep.append("\"{\\\"a\\\":\\\"").append(OPAQUE).append("\\\"}\"");
+        for (int i = 0; i < 99; i++) {
+            deep.append(']');
+        }
+
+        assertFalse(scrubBody(deep.toString()).contains(OPAQUE));
+    }
+
+    /** Separate markers, each with its own span: building the result must not move the tail each time. */
+    @Test
+    public void manySeparateSpansDoNotCostQuadraticTime() {
+        StringBuilder many = new StringBuilder();
+        for (int i = 0; i < 400_000; i++) {
+            many.append("&token=x");
+        }
+
+        long started = System.nanoTime();
+        String scrubbed = scrub(many.toString());
+        long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+
+        assertEquals(400_000 * "&token=***".length(), scrubbed.length());
+        // Linear takes tens of milliseconds here and in-place replacing about twenty seconds.
+        assertTrue("took " + elapsedMs + "ms, which is the quadratic replace back", elapsedMs < 3_000);
     }
 
     /** The same string of markers, now cheap because each scan resumes where the last one stopped. */

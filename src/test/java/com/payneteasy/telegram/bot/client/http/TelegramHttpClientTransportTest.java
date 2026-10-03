@@ -248,6 +248,29 @@ public class TelegramHttpClientTransportTest {
     }
 
     /**
+     * A description that does not parse but names the secret field: before, a comment in front of a
+     * truncated document or a percent-encoded byte order mark sent it out as prose, into both the
+     * exception and the DEBUG record of the response.
+     */
+    @Test
+    public void aDescriptionThatNamesTheSecretButDoesNotParseIsWithheld() {
+        for (String description : new String[] {
+                "/*prefix*/{\\\"secret_token\\\":\\\"" + SECRET + "\\\"",
+                "%EF%BB%BF%7B%22secret_token%22:%22" + SECRET + "%22%7D",
+        }) {
+            responseBody = "{\"ok\":false,\"error_code\":400,\"description\":\"" + description + "\"}";
+
+            try {
+                service(TokenTransport.HEADER, baseUrl + "/telegram").setWebhook(new TelegramWebhookRequest("https://h/hook"));
+                fail("ok=false must not be swallowed");
+            } catch (TelegramCommandException e) {
+                assertNoSecretsInChain(e);
+                assertTrue(e.getMessage(), e.getMessage().contains("withheld"));
+            }
+        }
+    }
+
+    /**
      * The parser quotes the fragment it choked on, and that fragment is a piece of the body. Here
      * it is a webhook secret rather than a token, so nothing about its shape would save it — only
      * dropping the parser's text does.

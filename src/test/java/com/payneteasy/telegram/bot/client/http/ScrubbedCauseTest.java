@@ -72,6 +72,20 @@ public class ScrubbedCauseTest {
         assertEquals(outer.getStackTrace().length, scrubbed.getStackTrace().length);
     }
 
+    /** The parse-failure path walks the same chains, cycles included. */
+    @Test
+    public void typeOnlySurvivesACycleInTheChain() {
+        Exception first  = new Exception("first");
+        Exception second = new Exception("second");
+        first.initCause(second);
+        second.initCause(first);
+
+        ScrubbedCause scrubbed = ScrubbedCause.typeOnly(first);
+
+        assertNotNull(scrubbed.getCause());
+        assertNull("the cycle has to stop somewhere", scrubbed.getCause().getCause());
+    }
+
     @Test
     public void nothingToCopyIsNotAFailure() {
         assertNull(ScrubbedCause.sanitize(null));

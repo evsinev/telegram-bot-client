@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -22,7 +23,8 @@ import java.util.regex.Pattern;
  *
  * The rule this class exists to enforce: a string that came from the network, or that
  * contains an assembled URL, reaches a log record or an exception message only through
- * {@link #scrub(String)} or {@link #scrubBody(String)}. Enumerating the places instead of
+ * {@link #scrub(String)}, {@link #scrubBody(String)} or, for a piece of a body such as the
+ * description of a refusal, {@link #scrubFragment(String)}. Enumerating the places instead of
  * stating the rule has already proved to be an incomplete list twice.
  *
  * Mirrors the scrubber on the other side of the connection so that both ends of the connection hide the same
@@ -80,8 +82,8 @@ public final class TelegramLogScrubber {
      * Scrub a response or request body. Parsing it undoes Gson's escaping in one move, so the
      * query-parameter rule works on a value that is a URL rather than on its escaped spelling.
      *
-     * A body that does not parse — truncated, an HTML error page from an intermediary, or deeper
-     * than the parser can take — falls back to the flat rules.
+     * A body that does not walk as an object or an array — truncated, an HTML error page from an
+     * intermediary, deeper than the parser can take — is not logged at all, only its length.
      */
     public static String scrubBody(String aBody) {
         return scrubBody(aBody, 0);
@@ -121,16 +123,18 @@ public final class TelegramLogScrubber {
     }
 
     /**
-     * A string inside a body that walked.
+     * A piece of a body handed over as a string: the {@code description} of a refusal, a string
+     * field inside a body that walked.
      *
-     * Three outcomes, and which one applies is decided by the parser wherever it can be: a string
-     * that is an object or an array is walked like the body it is; a string that was written as one
-     * and did not parse is withheld, exactly as the same text standing alone would be; anything
-     * else is text, keeps its diagnosis and goes through the flat rules.
+     * Three outcomes, none of them a guess about what the text was meant to be. A string the parser
+     * takes as an object or an array is walked like the body it is. A string it does not take, but
+     * which names {@code secret_token} anywhere, encoding undone, is withheld: the flat rules cannot
+     * see a key, so that name is the one thing they would let through. Anything else is text, keeps
+     * its diagnosis and goes through the flat rules.
      *
-     * The opening-brace test is a guess, and for a body it was the wrong tool — the parser accepts
-     * things it does not predict. Here it is bounded: a wrong yes costs one field's text, where for
-     * a body it decided whether a secret was printed.
+     * An earlier version decided by the first character instead, and that guess disagreed with the
+     * parser the way every such guess has: a comment or a {@code )]}'} guard before a truncated
+     * document, or a byte order mark spelled in percent escapes, and the secret went out as prose.
      */
     public static String scrubFragment(String aValue) {
         return aValue == null || aValue.isEmpty() ? aValue : scrubStringValue(aValue, 0);
@@ -143,19 +147,16 @@ public final class TelegramLogScrubber {
         if (nested != null) {
             return scrubJson(nested, aDepth + 1).toString();
         }
-        return writtenAsJson(aValue) ? withheld(aValue) : scrub(aValue);
+        return namesTheSecretField(aValue) ? withheld(aValue) : scrub(aValue);
     }
 
-    /** Whether the text opens as an object or an array, encoding undone. */
-    private static boolean writtenAsJson(String aText) {
-        String decoded = Decoded.of(aText).text;
-        for (int i = 0; i < decoded.length(); i++) {
-            char c = decoded.charAt(i);
-            if (!Character.isWhitespace(c) && c != '\ufeff') {
-                return c == '{' || c == '[';
-            }
-        }
-        return false;
+    /**
+     * Whether the name of the secret field occurs anywhere in the text, encoding undone and case
+     * ignored. Withholding a description that merely mentions it costs one line of diagnosis; the
+     * other way round costs the secret.
+     */
+    private static boolean namesTheSecretField(String aText) {
+        return Decoded.of(aText).text.toLowerCase(Locale.ROOT).contains(SECRET_TOKEN_FIELD_NAME);
     }
 
     /** @return the parsed object or array, or null when it is neither or will not parse */
@@ -174,7 +175,8 @@ public final class TelegramLogScrubber {
      * Two rules, neither of which has anything to do with JSON, which is why neither breaks on it:
      * the sensitive query parameters and the token pattern. A {@code secret_token} is not among
      * them — it is recognised by the name of its key, and a key is a thing structure has. Bodies
-     * are handled by {@link #scrubBody(String)} and never arrive here.
+     * are handled by {@link #scrubBody(String)} and never arrive here; a fragment arrives only
+     * once {@link #scrubFragment(String)} has found that it neither walks nor names that key.
      *
      * The marker is found in the decoded copy — that is what an encoded parameter name needs — and
      * where the value <em>ends</em> is decided by walking the original. Both halves matter: looking
@@ -256,9 +258,17 @@ public final class TelegramLogScrubber {
         return aText.length();
     }
 
-    /** A {@code ?} is an ordinary character inside a query (RFC 3986 §3.4), so it ends nothing. */
+    /**
+     * Only what cannot stand inside a query value ends one: the separator, and characters a URI
+     * does not allow at all — the place where a URL embedded in text has run out.
+     *
+     * A {@code ?} and a {@code '} are both ordinary characters inside a query (RFC 3986 §3.4, the
+     * apostrophe being one of the sub-delims), and ending the value at either let its tail out.
+     * When a URL is quoted in a message, the closing quote is now masked along with the value; that
+     * is the right way to be wrong here.
+     */
     private static boolean endsValue(char aChar) {
-        return aChar == '&' || aChar == '\'' || aChar == '<' || aChar == '>' || Character.isWhitespace(aChar);
+        return aChar == '&' || aChar == '<' || aChar == '>' || Character.isWhitespace(aChar);
     }
 
 
@@ -324,12 +334,15 @@ public final class TelegramLogScrubber {
             }
         }
 
-        StringBuilder out = new StringBuilder(aOriginal);
-        for (int i = merged.size() - 1; i >= 0; i--) {
-            Span span = merged.get(i);
-            out.replace(span.maskFrom, span.maskTo, span.separator + MASK);
+        // Built front to back rather than replaced in place: every replace moves the tail after it,
+        // and on a string of separate markers that made the whole pass quadratic.
+        StringBuilder out  = new StringBuilder(aOriginal.length());
+        int           kept = 0;
+        for (Span span : merged) {
+            out.append(aOriginal, kept, span.maskFrom).append(span.separator).append(MASK);
+            kept = span.maskTo;
         }
-        return out.toString();
+        return out.append(aOriginal, kept, aOriginal.length()).toString();
     }
 
     /** One match, in positions of the original string: where it starts, and what to replace. */
