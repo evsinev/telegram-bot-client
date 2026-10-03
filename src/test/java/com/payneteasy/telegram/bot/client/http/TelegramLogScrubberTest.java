@@ -216,7 +216,7 @@ public class TelegramLogScrubberTest {
     @Test
     public void aBodyIsNeverHandedToItself() {
         for (String body : new String[] { "%22foo%22", "%7B%7D", "%22secret_token%22%3A%22" + OPAQUE + "%22" }) {
-            assertFalse(body, scrubBody(body).contains(OPAQUE));
+            assertEquals(body, "<unparsable body, " + body.length() + " chars, withheld>", scrubBody(body));
         }
     }
 
@@ -298,6 +298,12 @@ public class TelegramLogScrubberTest {
         assertEquals("https://h/?secret_token=***&x=keep", scrub("https://h/?secret_token=foo'" + OPAQUE + "&x=keep"));
     }
 
+    /** Gson's spelling of the apostrophe is the same character, and it does not end the value either. */
+    @Test
+    public void aJsonEscapedApostropheInsideAValueDoesNotEndIt() {
+        assertEquals("https://h/?token=***&x=keep", scrub("https://h/?token=foo\\u0027" + OPAQUE + "&x=keep"));
+    }
+
     /** A secret whose own characters are encoded is found in the decoded copy. */
     @Test
     public void aTokenWithEncodedCharactersIsStillFound() {
@@ -332,6 +338,24 @@ public class TelegramLogScrubberTest {
         }
 
         assertFalse(scrubBody(deep.toString()).contains(OPAQUE));
+    }
+
+    /**
+     * A string at the limit is still parsed and the document inside it is masked by the budget,
+     * whatever its keys are called. Not parsing it there would hand an unwalked document to rules
+     * that cannot see a key.
+     */
+    @Test
+    public void aDocumentInAStringAtTheLimitIsMaskedByTheBudget() {
+        StringBuilder open  = new StringBuilder();
+        StringBuilder close = new StringBuilder();
+        for (int i = 0; i < 100; i++) {
+            open.append('[');
+            close.append(']');
+        }
+
+        assertEquals(open + "\"\\\"***\\\"\"" + close,
+                scrubBody(open + "\"{\\\"a\\\":\\\"" + OPAQUE + "\\\"}\"" + close));
     }
 
     /** Separate markers, each with its own span: building the result must not move the tail each time. */

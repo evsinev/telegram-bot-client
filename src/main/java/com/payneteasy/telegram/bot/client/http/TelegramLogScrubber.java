@@ -170,7 +170,7 @@ public final class TelegramLogScrubber {
     }
 
     /**
-     * Scrub a flat string: a URL, an exception message, a body that did not parse.
+     * Scrub a flat string: a URL, an exception message, a fragment that is plain text.
      *
      * Two rules, neither of which has anything to do with JSON, which is why neither breaks on it:
      * the sensitive query parameters and the token pattern. A {@code secret_token} is not among
