@@ -232,6 +232,63 @@ public class TelegramHttpClientTransportTest {
     }
 
     /**
+     * The description of a refusal is a piece of the body, not prose of ours. Telegram putting a
+     * structure there must be walked; it reaches the caller as the message of the exception.
+     */
+    @Test
+    public void aDescriptionThatIsAStructureIsWalkedNotFlattened() {
+        responseBody = "{\"ok\":false,\"error_code\":400,\"description\":\"{\\\"secret_token\\\":\\\"" + SECRET + "\\\"}\"}";
+
+        try {
+            service(TokenTransport.HEADER, baseUrl + "/telegram").setWebhook(new TelegramWebhookRequest("https://h/hook"));
+            fail("ok=false must not be swallowed");
+        } catch (TelegramCommandException e) {
+            assertNoSecretsInChain(e);
+        }
+    }
+
+    /**
+     * A description that does not parse but names the secret field: before, a comment in front of a
+     * truncated document or a percent-encoded byte order mark sent it out as prose, into both the
+     * exception and the DEBUG record of the response.
+     */
+    @Test
+    public void aDescriptionThatNamesTheSecretButDoesNotParseIsWithheld() {
+        for (String description : new String[] {
+                "/*prefix*/{\\\"secret_token\\\":\\\"" + SECRET + "\\\"",
+                "%EF%BB%BF%7B%22secret_token%22:%22" + SECRET + "%22%7D",
+        }) {
+            responseBody = "{\"ok\":false,\"error_code\":400,\"description\":\"" + description + "\"}";
+
+            try {
+                service(TokenTransport.HEADER, baseUrl + "/telegram").setWebhook(new TelegramWebhookRequest("https://h/hook"));
+                fail("ok=false must not be swallowed");
+            } catch (TelegramCommandException e) {
+                assertNoSecretsInChain(e);
+                assertTrue(e.getMessage(), e.getMessage().contains("withheld"));
+            }
+        }
+    }
+
+    /**
+     * The parser quotes the fragment it choked on, and that fragment is a piece of the body. Here
+     * it is a webhook secret rather than a token, so nothing about its shape would save it — only
+     * dropping the parser's text does.
+     */
+    @Test
+    public void aParseFailureDoesNotCarryTheFragmentItChokedOn() {
+        responseBody = "{\"ok\":false,\"error_code\":\"{\\\"secret_token\\\":\\\"" + SECRET + "\\\"}\"}";
+
+        try {
+            service(TokenTransport.HEADER, baseUrl + "/telegram").setWebhook(new TelegramWebhookRequest("https://h/hook"));
+            fail("a body that does not fit the response class must not pass");
+        } catch (RuntimeException e) {
+            assertNoSecretsInChain(e);
+            assertTrue("the diagnosis has to survive", renderChain(e).contains("Cannot parse the answer"));
+        }
+    }
+
+    /**
      * A base address without a scheme: MalformedURLException names the whole URL, and in URL mode
      * that URL holds the token. The cause travels out of the client, so it has to be scrubbed too.
      */
