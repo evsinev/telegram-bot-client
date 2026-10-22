@@ -16,7 +16,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <gson.version>2.14.0</gson.version>
         <slf4j.version>2.0.18</slf4j.version>
-        <logback.version>1.3.15</logback.version>
+        <!-- test scope only; 1.6.x needs Java 11 to run the tests, the jar itself stays Java 8 (release 8) -->
+        <logback.version>1.6.5</logback.version>
         <commons-io.version>2.22.0</commons-io.version>
         <junit.version>4.13.2</junit.version>
         <lombok.version>1.18.46</lombok.version>
@@ -159,8 +160,8 @@
                     <artifactId>maven-compiler-plugin</artifactId>
                     <version>3.14.0</version>
                     <configuration>
-                        <source>1.8</source>
-                        <target>1.8</target>
+                        <!-- the library stays Java 8 compatible; building needs JDK 11+ (logback 1.6 in tests) -->
+                        <release>8</release>
                     </configuration>
                 </plugin>
 
