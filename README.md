@@ -209,4 +209,4 @@ mvn clean install   # build the jar
 mvn test            # run the unit tests
 ```
 
-Requires JDK 8+ and Maven 3.
+Building requires JDK 11+ (tests use logback 1.6) and Maven 3; the jar itself targets Java 8.
